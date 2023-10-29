@@ -1,3 +1,4 @@
+import argparse
 import os
 import numpy as np
 import torch
@@ -6,12 +7,14 @@ import cv2
 from PIL import Image
 
 from multiprocessing import Pool
-from skimage.segmentation import slic
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from mmseg.datasets import PascalVOCDataset
 
-from tqdm import tqdm
+# slic methods
+from skimage.segmentation import slic
+from fast_slic import Slic as fslic
 
 def compute_slic(img_base_dir, img_name):
     # im = Image.open(os.path.join(img_base_dir, img_name))
@@ -40,7 +43,7 @@ def compute_slic_30(img_base_dir, img_name):
 def compute_slic_fast(img_base_dir, img_name):
     # im = Image.open(os.path.join(img_base_dir, img_name))
     im = cv2.imread(os.path.join(img_base_dir, img_name))
-    slic = Slic(num_components=150, compactness=6)
+    slic = fslic(num_components=150, compactness=6)
     segments_slic = slic.iterate(im).astype(np.uint8)
     
     im = Image.fromarray(segments_slic)
@@ -86,6 +89,12 @@ def compute_slic_and_render_superpixels(img_base_dir, img_name, out_base_dir):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='For Generation of Transferrable Attack')
+    parser.add_argument('--dataroot', type=str, default='../data', help='Location of the data.')
+    parser.add_argument('--slic_mode', type=str, default='scikit', help='[scikit | fast] Superpixel method mode.')
+    parser.add_argument('--seg_num', type=int, default=30, help='Superpixel method mode.')
+    args = parser.parse_args()
+    
     val_dataset = PascalVOCDataset(
         data_root = '../data/VOCdevkit/VOC2012',
         data_prefix=dict(
@@ -93,14 +102,27 @@ if __name__ == "__main__":
         ann_file='ImageSets/Segmentation/val.txt',
     )
 
+    
+    slic_dir = os.path.join(args.dataroot, 'superpixel_img')
+    slic_dir = os.path.join(slic_dir, args.slic_mode + str(args.seg_num))
+    os.makedirs(slic_dir)
+    
     for i in tqdm(range(len(val_dataset))):
         datasample = val_dataset[i]
         img = cv2.imread(datasample['img_path'])
         img_name = datasample['img_path'].split('/')[-1]
-        save_path = os.path.join('../data/superpixel_img/slic150', img_name)
+        save_path = os.path.join(slic_dir, img_name)
         
-        # scikit 
-        superpixel = slic(img, n_segments=150, compactness=6, sigma=3.0, start_label=0).astype(np.uint8)
-        superpixel = Image.fromarray(superpixel)
-        superpixel.save(save_path)
+        if args.slic_mode == 'scikit':
+            sp = slic(img, n_segments=args.seg_num, compactness=6, sigma=3.0, start_label=0).astype(np.uint8)
+            
+        elif args.slic_mode == 'fast':
+            slic_method = fslic
+            slic = fslic(num_components=150, compactness=6)
+            sp = slic.iterate(im).astype(np.uint8)
+        else:
+            raise ValueError('Slice Method is not Supported: {}'.format(args.slic_mode))
+        
+        sp = Image.fromarray(sp)
+        sp.save(save_path)
         tqdm.write(save_path)

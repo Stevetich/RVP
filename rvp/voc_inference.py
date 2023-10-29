@@ -59,7 +59,7 @@ prompt_template = "<img>{img_path}</img>The blue mask in the figure covers part 
 
 # Rendering all hyperpixels of the same image once at a time
 voc_img_base_dir = "../data/VOCdevkit/VOC2012/JPEGImages"
-superpixel_base_dir = "../data//superpixel_img/slic150"
+superpixel_base_dir = "../data/superpixel_img/slic30"
 val_img_name_list = os.listdir(superpixel_base_dir)
 
 for img_name in tqdm(val_img_name_list, desc="Processing VOC2012:"):
