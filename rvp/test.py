@@ -105,7 +105,8 @@ if __name__ == "__main__":
     
     slic_dir = os.path.join(args.dataroot, 'superpixel_img')
     slic_dir = os.path.join(slic_dir, args.slic_mode + str(args.seg_num))
-    os.makedirs(slic_dir)
+    os.makedirs(slic_dir, exist_ok=True)
+    print ('Save superpixel images path: {}'.format(slic_dir))
     
     for i in tqdm(range(len(val_dataset))):
         datasample = val_dataset[i]
@@ -119,10 +120,11 @@ if __name__ == "__main__":
         elif args.slic_mode == 'fast':
             slic_method = fslic
             slic = fslic(num_components=150, compactness=6)
-            sp = slic.iterate(im).astype(np.uint8)
+            sp = slic.iterate(img).astype(np.uint8)
         else:
             raise ValueError('Slice Method is not Supported: {}'.format(args.slic_mode))
         
-        sp = Image.fromarray(sp)
-        sp.save(save_path)
-        tqdm.write(save_path)
+        # sp = Image.fromarray(sp)
+        # sp.save(save_path)
+        # tqdm.write(save_path)
+        cv2.imwrite(save_path, sp)

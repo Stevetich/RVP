@@ -13,10 +13,10 @@ def save_rendered_imgs(voc_img_base_dir, superpixel_base_dir):
         voc_img_base_dir (str): Directory of voc images.
         superpixel_base_dir (str): Directory of corresponding superpixel images.
     """
-    val_img_name_list = os.listdir(voc_img_base_dir)
+    val_img_name_list = os.listdir(superpixel_base_dir)
 
     for img_name in tqdm(val_img_name_list, desc="Processing VOC2012:"):
-        img = cv2.imread(os.path.join(voc_img_base_dir, img_name.split('.')[0]+".jpg"))
+        img = cv2.imread(os.path.join(voc_img_base_dir, img_name))
         superpixels = cv2.imread(os.path.join(superpixel_base_dir, img_name))
         superpixels_ids = np.unique(superpixels)
         
@@ -43,15 +43,15 @@ def save_rendered_imgs(voc_img_base_dir, superpixel_base_dir):
         rendered_imgs = img_repeated * 0.6 + superpixels_masks * Blue * 0.4
         # rendered_imgs = K.enhance.add_weighted(img_repeated, 0.6, superpixels_masks, 0.4, 0)
         
-        rendered_img_save_dir = '../data/rendered_img/scikit30'
+        rendered_img_save_dir = '../data/rendered_img/scikit30/B'
         rendered_img_save_dir = os.path.join(rendered_img_save_dir, img_name.split('.')[0])
         os.makedirs(rendered_img_save_dir, exist_ok=True)
         
-        for id in range(len(rendered_imgs)):
-            rendered_img = rendered_imgs[id].permute(1,2,0).numpy().astype(np.uint8)
+        for id in range(rendered_imgs.shape[0]):
+            rendered_img = rendered_imgs[id].permute(1, 2, 0).numpy().astype(np.uint8)
             img_path = os.path.join(rendered_img_save_dir, "{}.jpg".format(id))
             
-            print(img_path)
+            # print(img_path)
             cv2.imwrite(img_path, rendered_img)
             
 if __name__ == '__main__':

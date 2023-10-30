@@ -1,3 +1,4 @@
+import argparse
 from modelscope import (
     snapshot_download, AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 )
@@ -38,22 +39,27 @@ prompt_template = "<img>{img_path}</img>The blue mask in the figure covers part 
     please analyze what is the most likely category of this object? Please select from the categories given below: {class_names}.\
     Please distinguish as many categories of objects as possible, and do not be affected by the main objects in the figure."
 
-voc_img_base_dir = "../data/VOCdevkit/VOC2012/JPEGImages"
-superpixel_base_dir = "../data/superpixel_img/scikit30"
-val_img_name_list = os.listdir(superpixel_base_dir)
+voc_base_dir = "VOCdevkit/VOC2012/JPEGImages"
+superpixel_base_dir = "superpixel_img"
+rendered_base_dir = "rendered_img"
+semseg_base_dir = "sem_seg_preds"
 
 
 class RenderedImageDataset(Dataset):
-    def __init__(self, rendered_img_dir: str='../data/rendered_img/scikit30'):
+    def __init__(self, rendered_dir: str):
+        """
+        Encapsulation for DDP (or DistributedDataSampler).
+        Args:
+            rendered_dir (str): Directory of rendered images.
+        """
         super().__init__()
-        # self.tokenizer = tokenizer
-        # self.prompt = prompt
-        self.rendered_img_dir = rendered_img_dir
-        
-        self.img_names = os.listdir(rendered_img_dir)
+        if not os.path.isdir(rendered_dir):
+            raise NotADirectoryError('Not a valid rendered image dir: {}'.format(rendered_dir))
+        self.rendered_dir = rendered_dir
+        self.img_names = os.listdir(rendered_dir)
     
     def __getitem__(self, idx):
-        id_img_path = os.path.join(self.rendered_img_dir, self.img_names[idx])
+        id_img_path = os.path.join(self.rendered_dir, self.img_names[idx])
         return id_img_path, self.img_names[idx], idx
     
     def __len__(self):
@@ -61,13 +67,39 @@ class RenderedImageDataset(Dataset):
         
 
 def main():
+    parser = argparse.ArgumentParser(description='For Generation of Semantic Segmentation Predictions.')
+    parser.add_argument('--data_root', type=str, default='../data', help='Location of the data.')
+    parser.add_argument('--slic_mode', type=str, default='scikit', help='[scikit | fast] Superpixel method mode.')
+    parser.add_argument('--seg_num', type=int, default=30, help='Superpixel method mode.')
+    parser.add_argument('--color', type=str, default='B', help='[R | G | B] Color of superpixel mask.')
+    parser.add_argument('--batch_size', '-b', type=int, default=8, help='Batch size.')
+    parser.add_argument("--local_rank", type=int)
+    args = parser.parse_args()
+    
+    batch_size = args.batch_size
     torch.manual_seed(1234)
     
+    # Directories
+    slic_method_name = args.slic_mode + str(args.seg_num)
+    voc_img_dir = os.path.join(args.data_root, voc_base_dir)
+    superpixel_dir = os.path.join(args.data_root, superpixel_base_dir, slic_method_name)
+    semseg_save_dir = os.path.join(args.data_root, semseg_base_dir, slic_method_name, args.color)
+    if not os.path.isdir(semseg_save_dir):
+        os.makedirs(semseg_save_dir, exist_ok=True)
+    
+    if not os.path.isdir(superpixel_dir):
+        raise NotADirectoryError('Not a valid superpixel image dir: {}'.format(superpixel_dir))
+    print ('Voc original images dir: {}'.format(voc_img_dir))
+    print ('Superpixel images dir: {}'.format(superpixel_dir))
+    print ('Semantic segmentation predictions save dir: {}'.format(semseg_save_dir))
+    
+    # DDP
     dist.init_process_group("nccl", init_method='env://')
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     torch.cuda.set_device(rank)
     
+    # Tokenizer and VL-Model
     tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
     if not hasattr(tokenizer, 'model_dir'):
         tokenizer.model_dir = model_dir
@@ -81,16 +113,18 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="cuda", trust_remote_code=True).eval()
     
     
-    batch_size = 8
-    val_dataset = RenderedImageDataset()
+    # Dataset
+    val_dataset = RenderedImageDataset(
+        os.path.join(args.data_root, rendered_base_dir, slic_method_name, args.color))
     sampler = DistributedSampler(val_dataset, shuffle=False)
     val_loader = DataLoader(val_dataset, batch_size=1, sampler=sampler)
     
     for rendered_img_path, img_name, idx in val_loader:
-        print ("idx: {}".format(idx.item()))
+        # img_name: without postfix (.jpg)
+        print ("Index: {}".format(idx.item()))
 
-        img = cv2.imread(os.path.join(voc_img_base_dir, img_name[0]+".jpg"))
-        superpixels = cv2.imread(os.path.join(superpixel_base_dir, img_name[0]+".jpg"))
+        img = cv2.imread(os.path.join(voc_img_dir, img_name[0]+".jpg"))
+        superpixels = cv2.imread(os.path.join(superpixel_dir, img_name[0]+".jpg"))
         superpixels_ids = np.unique(superpixels)
 
         # Gather per superpixel masks
@@ -106,9 +140,6 @@ def main():
         id_imgs = os.listdir(rendered_img_path[0])
         num_batches = int(np.ceil(len(id_imgs) / batch_size))
         id_imgs_batch = []
-        
-
-        
         for i in range(num_batches):
             batch = id_imgs[i*batch_size: min((i+1)*batch_size, len(id_imgs))]
             id_imgs_batch.append(batch)
@@ -121,19 +152,16 @@ def main():
             responses, history = model.chat(tokenizer=tokenizer, queries=queries, history=None)
             
             for response, id in zip(responses, batch):
+                # id: with postfix (.jpg)
                 try:
+                    id = int(id.split('.')[0])
                     class_id = name2id[response]
                     superpixel_mask = superpixels_masks[id, 0]
                     pred_sem_seg[superpixel_mask] = class_id
-                    # import ipdb
-                    # ipdb.set_trace()
                 except:
                     continue
-        
-        
-        pred_sem_seg_save_dir = "../data/sem_seg_preds/VOC2012/B/"
-        os.makedirs(pred_sem_seg_save_dir, exist_ok=True)
-        cv2.imwrite(os.path.join(pred_sem_seg_save_dir, img_name[0]+".jpg"), pred_sem_seg.numpy().astype(np.uint8))
+            
+        cv2.imwrite(os.path.join(semseg_save_dir, img_name[0]+".jpg"), pred_sem_seg.numpy().astype(np.uint8))
 
     
 if __name__ == '__main__':
