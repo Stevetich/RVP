@@ -100,8 +100,8 @@ def compute_slic_and_render_superpixels(img_base_dir, img_name, out_base_dir):
 def parse_args():
     parser = argparse.ArgumentParser(
         description='MMSeg test (and eval) a model')
-    parser.add_argument('config', help='train config file path')
-    parser.add_argument('checkpoint', help='checkpoint file')
+    parser.add_argument('--config', default='../mmsegmentation/my_configs/pascal_voc12_base.py', help='train config file path')
+    parser.add_argument('--checkpoint', help='checkpoint file')
     parser.add_argument(
         '--work-dir',
         help=('if specified, the evaluation metric results will be dumped'
@@ -207,13 +207,14 @@ if __name__ == "__main__":
     runner.call_hook('before_val_epoch')
     runner.model.eval()
 
-    sem_pred_dir_R = "/mnt/dolphinfs/hdd_pool/docker/user/hadoop-vacv/jiaoyang/Qwen-VL/sem_seg_preds/VOC2012/"
-    sem_pred_dir_G = "/mnt/dolphinfs/hdd_pool/docker/user/hadoop-vacv/jiaoyang/Qwen-VL/sem_seg_preds/VOC2012/G/"
-    sem_pred_dir_B = "/mnt/dolphinfs/hdd_pool/docker/user/hadoop-vacv/jiaoyang/Qwen-VL/sem_seg_preds/VOC2012/B/"
+    # sem_pred_dir_R = "/mnt/dolphinfs/hdd_pool/docker/user/hadoop-vacv/jiaoyang/Qwen-VL/sem_seg_preds/VOC2012/"
+    # sem_pred_dir_G = "/mnt/dolphinfs/hdd_pool/docker/user/hadoop-vacv/jiaoyang/Qwen-VL/sem_seg_preds/VOC2012/G/"
+    # sem_pred_dir_B = "/mnt/dolphinfs/hdd_pool/docker/user/hadoop-vacv/jiaoyang/Qwen-VL/sem_seg_preds/VOC2012/B/"
+    sem_pred_dir_B = "/home/jy/mm/RVP/data/sem_seg_preds/VOC2012/B"
 
     for idx, data_batch in enumerate(val_dataloader):
         runner.call_hook('before_val_iter', batch_idx=idx, data_batch=data_batch)
-        
+        print ('Index: {}'.format(idx))
         # # outputs = runner.model.val_step(data_batch)
         # from mmcv.transforms import LoadImageFromFile
         # from mmseg.datasets.transforms import LoadAnnotations
@@ -231,22 +232,30 @@ if __name__ == "__main__":
         img_name = pseudo_outputs.img_path.split('/')[-1]
         # sem_pred = cv2.imread(os.path.join(sem_pred_dir, img_name.split('.')[0]+".png"))
         # sem_pred = torch.tensor(sem_pred)[:,:,[0]].permute(2,0,1)
-        sem_pred_R = cv2.imread(os.path.join(sem_pred_dir_R, img_name.split('.')[0]+".png"))
+        
+        sem_pred_R = cv2.imread(os.path.join(sem_pred_dir_B, img_name))
         sem_pred_R = torch.tensor(sem_pred_R)[:,:,[0]].permute(2,0,1)
-        sem_pred_G = cv2.imread(os.path.join(sem_pred_dir_G, img_name.split('.')[0]+".png"))
+        sem_pred_G = cv2.imread(os.path.join(sem_pred_dir_B, img_name))
         sem_pred_G = torch.tensor(sem_pred_G)[:,:,[0]].permute(2,0,1)
-        sem_pred_B = cv2.imread(os.path.join(sem_pred_dir_B, img_name.split('.')[0]+".png"))
+        
+        sem_pred_B = cv2.imread(os.path.join(sem_pred_dir_B, img_name))
+        # print (os.path.join(sem_pred_dir_B, img_name.split('.')[0]+".png"))
+        # print ("sem_pred_B: {}, shape: {}".format(sem_pred_B, sem_pred_B.shape))
         sem_pred_B = torch.tensor(sem_pred_B)[:,:,[0]].permute(2,0,1)
 
         sem_pred = torch.zeros_like(sem_pred_R)
         sem_pred_merge = torch.cat([sem_pred_R, sem_pred_G, sem_pred_B], dim=0)
+        # print ('sem_pred_merge: {}, shape: {}'.format(sem_pred_merge, sem_pred_merge.shape))
+        
+        # vote
         for i in range(sem_pred_merge.shape[1]):
             for j in range(sem_pred_merge.shape[2]):
                 sem_pred[:, i, j] = torch.argmax(torch.bincount(sem_pred_merge[:, i, j]))
+        # print ('sem_pred: {}, shape: {}'.format(sem_pred, sem_pred.shape))
 
         pred_sem_seg = PixelData()
         # pred_sem_seg.data = pseudo_outputs.gt_sem_seg.data
-        pred_sem_seg.data = sem_pred
+        pred_sem_seg.data = sem_pred_B
         pseudo_outputs.pred_sem_seg = pred_sem_seg
         pseudo_outputs = [pseudo_outputs]
 
@@ -272,7 +281,7 @@ if __name__ == "__main__":
             data_batch=data_batch,
             outputs=pseudo_outputs)
 
-        if idx == 9:
+        if idx == 100:
             break
         
     metrics = evaluator.evaluate(len(val_dataloader.dataset))
