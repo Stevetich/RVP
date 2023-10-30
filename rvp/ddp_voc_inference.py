@@ -2,15 +2,11 @@ import argparse
 from modelscope import (
     snapshot_download, AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 )
-import shutil
-# from mmseg.datasets import PascalVOCDataset
 import os
 import cv2
 import numpy as np
-from tqdm import tqdm
 
 import torch
-import torch.nn as nn
 import torch.distributed as dist
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
@@ -127,7 +123,7 @@ def main():
         superpixels = cv2.imread(os.path.join(superpixel_dir, img_name[0]+".jpg"))
         superpixels_ids = np.unique(superpixels)
 
-        # Gather per superpixel masks
+        # Gather superpixel masks
         superpixels_masks = []
         for superpixel_id in superpixels_ids:
             mask = (superpixels == superpixel_id)
@@ -137,6 +133,7 @@ def main():
         superpixels_masks = superpixels_masks.permute(0,3,1,2)
         pred_sem_seg = torch.zeros(img.shape[0], img.shape[1])
         
+        # Generate ID Batch for the single rendered image.
         id_imgs = os.listdir(rendered_img_path[0])
         num_batches = int(np.ceil(len(id_imgs) / batch_size))
         id_imgs_batch = []
@@ -144,6 +141,7 @@ def main():
             batch = id_imgs[i*batch_size: min((i+1)*batch_size, len(id_imgs))]
             id_imgs_batch.append(batch)
         
+        # Batch process
         for batch in id_imgs_batch:
             queries = []
             for id in batch:
