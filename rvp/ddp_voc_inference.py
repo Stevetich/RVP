@@ -68,26 +68,34 @@ def main():
     parser.add_argument('--slic_mode', type=str, default='scikit', help='[scikit | fast] Superpixel method mode.')
     parser.add_argument('--seg_num', type=int, default=30, help='Superpixel method mode.')
     parser.add_argument('--color', type=str, default='B', help='[R | G | B] Color of superpixel mask.')
-    parser.add_argument('--batch_size', '-b', type=int, default=8, help='Batch size.')
+    parser.add_argument('--batch_size', '-b', type=int, default=1, help='Batch size.')
     parser.add_argument("--local_rank", type=int)
     args = parser.parse_args()
+    
+    assert args.slic_mode in ['scikit', 'fast'], "Slic mode not supported: {}".format(args.slic_mode)
+    assert args.color in ['R', 'G', 'B'], "Color not supported: {}".format(args.color)
     
     batch_size = args.batch_size
     torch.manual_seed(1234)
     
     # Directories
     slic_method_name = args.slic_mode + str(args.seg_num)
-    voc_img_dir = os.path.join(args.data_root, voc_base_dir)
+    voc_dir = os.path.join(args.data_root, voc_base_dir)
     superpixel_dir = os.path.join(args.data_root, superpixel_base_dir, slic_method_name)
+    rendered_dir = os.path.join(args.data_root, rendered_base_dir, slic_method_name, args.color)
     semseg_save_dir = os.path.join(args.data_root, semseg_base_dir, slic_method_name, args.color)
     if not os.path.isdir(semseg_save_dir):
         os.makedirs(semseg_save_dir, exist_ok=True)
     
-    if not os.path.isdir(superpixel_dir):
-        raise NotADirectoryError('Not a valid superpixel image dir: {}'.format(superpixel_dir))
-    print ('Voc original images dir: {}'.format(voc_img_dir))
+    assert os.path.isdir(voc_dir), 'Not a valid voc image dir: {}'.format(voc_dir)
+    assert os.path.isdir(superpixel_dir), 'Not a valid superpixel image dir: {}'.format(superpixel_dir)
+    
+    print ('Voc original images dir: {}'.format(voc_dir))
     print ('Superpixel images dir: {}'.format(superpixel_dir))
     print ('Semantic segmentation predictions save dir: {}'.format(semseg_save_dir))
+        
+    print ('Slic method name: {}'.format(slic_method_name))
+    print ('Color mode: {}'.format(args.color))
     
     # DDP
     dist.init_process_group("nccl", init_method='env://')
@@ -110,8 +118,7 @@ def main():
     
     
     # Dataset
-    val_dataset = RenderedImageDataset(
-        os.path.join(args.data_root, rendered_base_dir, slic_method_name, args.color))
+    val_dataset = RenderedImageDataset(rendered_dir)
     sampler = DistributedSampler(val_dataset, shuffle=False)
     val_loader = DataLoader(val_dataset, batch_size=1, sampler=sampler)
     
@@ -119,7 +126,7 @@ def main():
         # img_name: without postfix (.jpg)
         print ("Index: {}".format(idx.item()))
 
-        img = cv2.imread(os.path.join(voc_img_dir, img_name[0]+".jpg"))
+        img = cv2.imread(os.path.join(voc_dir, img_name[0]+".jpg"))
         superpixels = cv2.imread(os.path.join(superpixel_dir, img_name[0]+".jpg"))
         superpixels_ids = np.unique(superpixels)
 
