@@ -41,26 +41,42 @@ def save_rendered_imgs(voc_dir, superpixel_dir, rendered_dir, color_mode):
         Green = color[1].reshape(1, 3, 1, 1)
         Blue = color[2].reshape(1, 3, 1, 1)
         
-        # Render images
-        if color_mode == 'R':
-            rendered_imgs = img_repeated * 0.6 + superpixels_masks * Red * 0.4
-        elif color_mode == 'G':
-            rendered_imgs = img_repeated * 0.6 + superpixels_masks * Green * 0.4
-        elif color_mode == 'B':
-            rendered_imgs = img_repeated * 0.6 + superpixels_masks * Blue * 0.4
-        else:
-            raise ValueError('Color not supported: {}'.format(color_mode))
-        # rendered_imgs = K.enhance.add_weighted(img_repeated, 0.6, superpixels_masks, 0.4, 0)
+        mask_imgs = torch.zeros_like(img_repeated)
+        remain_imgs = torch.zeros_like(img_repeated)
+        mask_imgs[superpixels_masks] = img_repeated[superpixels_masks]
+        remain_imgs[superpixels_masks.logical_not()] = img_repeated[superpixels_masks.logical_not()]
         
+        # Render images
+        # if color_mode == 'R':
+        #     rendered_imgs = (mask_imgs * 0.6 + superpixels_masks * Red * 0.4) + remain_imgs
+        # elif color_mode == 'G':
+        #     rendered_imgs = (mask_imgs * 0.6 + superpixels_masks * Green * 0.4) + remain_imgs
+        # elif color_mode == 'B':
+        #     rendered_imgs = (mask_imgs * 0.6 + superpixels_masks * Blue * 0.4) + remain_imgs
+        # else:
+        #     raise ValueError('Color not supported: {}'.format(color_mode))
+
+        
+        _, _, H, W = superpixels_masks.shape
+        y_coords = torch.arange(H)[None, None, :, None].expand_as(superpixels_masks)
+        x_coords = torch.arange(W)[None, None, None, :].expand_as(superpixels_masks)
+
+        y_weighted = superpixels_masks * y_coords
+        x_weighted = superpixels_masks * x_coords
+
+        y_center = y_weighted.sum(dim=(2, 3)) / torch.where(y_weighted != 0, 1, 0).sum(dim=(2, 3))
+        x_center = x_weighted.sum(dim=(2, 3)) / torch.where(x_weighted != 0, 1, 0).sum(dim=(2, 3))        
         
         rendered_img_save_dir = os.path.join(rendered_dir, img_name.split('.')[0])
         os.makedirs(rendered_img_save_dir, exist_ok=True)
         
         # Save rendered images of all ids per img
-        for id in range(rendered_imgs.shape[0]):
-            rendered_img = rendered_imgs[id].permute(1, 2, 0).numpy().astype(np.uint8)
-            img_path = os.path.join(rendered_img_save_dir, "{}.jpg".format(id))
+        for id in range(img_repeated.shape[0]):
+            # rendered_img = rendered_imgs[id].permute(1, 2, 0).numpy().astype(np.uint8)
+            rendered_img = img_repeated[id].permute(1, 2, 0).numpy().astype(np.uint8)
+            cv2.circle(rendered_img, (int(np.round(x_center[id][0].item())), int(np.round(y_center[id][0].item()))), 8, (0, 255, 0), -1)
             
+            img_path = os.path.join(rendered_img_save_dir, "{}.jpg".format(id))
             cv2.imwrite(img_path, rendered_img)
             
 if __name__ == '__main__':

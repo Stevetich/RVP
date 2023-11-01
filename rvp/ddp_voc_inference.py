@@ -31,9 +31,14 @@ for id, class_name in enumerate(classes):
     name2id[class_name] = id
     id2name[id] = class_name
 
-prompt_template = "<img>{img_path}</img>The {color} mask in the figure covers part of an object, \
-    please analyze what is the most likely category of this object? Please select from the categories given below: {class_names}.\
+# prompt_template = "<img>{img_path}</img>The {color} mask in the figure covers part of an object, \
+#     please analyze what is the most likely category of this object? Please select from the categories given below: {class_names}.\
+#     Please distinguish as many categories of objects as possible, and do not be affected by the main objects in the figure."
+    
+prompt_template = "<img>{img_path}</img>In the above provided image, I have marked a specific location with a green dot. \
+    Please analyze the content at the red dot's position and tell me what it most likely belongs from categories given below: {class_names}. \
     Please distinguish as many categories of objects as possible, and do not be affected by the main objects in the figure."
+    # Please just response with category names from the list I give you."
 
 voc_base_dir = "VOCdevkit/VOC2012/JPEGImages"
 superpixel_base_dir = "superpixel_img"

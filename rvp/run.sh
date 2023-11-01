@@ -1,8 +1,8 @@
 #!/bin/bash
 
-COLOR="R"
-SLIC_MODE="fast"
-SEG_NUM=150
+COLOR="B"
+SLIC_MODE="scikit"
+SEG_NUM=30
 DATA_ROOT="../data"
 GPU_NUM=8
 
@@ -27,7 +27,7 @@ TEST_COMMAND="python -m torch.distributed.launch --nproc_per_node=$GPU_NUM super
 
 
 
-echo "Saving super pixel images..."
+echo "Saving super pixel images..." 
 $SAVE_SP_COMMAND
 
 echo "Saving rendered images..."
