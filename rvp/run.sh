@@ -1,8 +1,8 @@
 #!/bin/bash
 
-COLOR="B"
+COLOR="R"
 SLIC_MODE="fast"
-SEG_NUM=10
+SEG_NUM=150
 DATA_ROOT="../data"
 GPU_NUM=8
 

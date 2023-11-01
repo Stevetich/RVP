@@ -31,7 +31,7 @@ for id, class_name in enumerate(classes):
     name2id[class_name] = id
     id2name[id] = class_name
 
-prompt_template = "<img>{img_path}</img>The blue mask in the figure covers part of an object, \
+prompt_template = "<img>{img_path}</img>The {color} mask in the figure covers part of an object, \
     please analyze what is the most likely category of this object? Please select from the categories given below: {class_names}.\
     Please distinguish as many categories of objects as possible, and do not be affected by the main objects in the figure."
 
@@ -39,6 +39,12 @@ voc_base_dir = "VOCdevkit/VOC2012/JPEGImages"
 superpixel_base_dir = "superpixel_img"
 rendered_base_dir = "rendered_img"
 semseg_base_dir = "sem_seg_preds"
+
+color_full = {
+    'B': 'blue',
+    'G': 'green',
+    'R': 'red'
+}
 
 
 class RenderedImageDataset(Dataset):
@@ -63,6 +69,12 @@ class RenderedImageDataset(Dataset):
         
 
 def main():
+    # DDP
+    dist.init_process_group("nccl", init_method='env://')
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    torch.cuda.set_device(rank)
+    
     parser = argparse.ArgumentParser(description='For Generation of Semantic Segmentation Predictions.')
     parser.add_argument('--data_root', type=str, default='../data', help='Location of the data.')
     parser.add_argument('--slic_mode', type=str, default='scikit', help='[scikit | fast] Superpixel method mode.')
@@ -90,18 +102,15 @@ def main():
     assert os.path.isdir(voc_dir), 'Not a valid voc image dir: {}'.format(voc_dir)
     assert os.path.isdir(superpixel_dir), 'Not a valid superpixel image dir: {}'.format(superpixel_dir)
     
-    print ('Voc original images dir: {}'.format(voc_dir))
-    print ('Superpixel images dir: {}'.format(superpixel_dir))
-    print ('Semantic segmentation predictions save dir: {}'.format(semseg_save_dir))
-        
-    print ('Slic method name: {}'.format(slic_method_name))
-    print ('Color mode: {}'.format(args.color))
+    if rank == 0:
+        print ('Voc original images dir: {}'.format(voc_dir))
+        print ('Superpixel images dir: {}'.format(superpixel_dir))
+        print ('Semantic segmentation predictions save dir: {}'.format(semseg_save_dir))
+            
+        print ('Slic method name: {}'.format(slic_method_name))
+        print ('Color mode: {}'.format(color_full[args.color]))
     
-    # DDP
-    dist.init_process_group("nccl", init_method='env://')
-    rank = dist.get_rank()
-    world_size = dist.get_world_size()
-    torch.cuda.set_device(rank)
+    
     
     # Tokenizer and VL-Model
     tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
@@ -152,7 +161,7 @@ def main():
         for batch in id_imgs_batch:
             queries = []
             for id in batch:
-                queries.append(prompt_template.format(img_path=os.path.join(rendered_img_path[0], id), class_names=classes_str))
+                queries.append(prompt_template.format(img_path=os.path.join(rendered_img_path[0], id), color=color_full[args.color], class_names=classes_str))
 
             responses, history = model.chat(tokenizer=tokenizer, queries=queries, history=None)
             
