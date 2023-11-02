@@ -4,7 +4,7 @@ _base_ = [
 ]
 
 dataset_type = 'PascalVOCDataset'
-data_root = '/home/jy/mm/RVP/data/VOCdevkit/VOC2012/'
+data_root = '/remote-home/zhangjiacheng/RVP/data/VOCdevkit/VOC2012/'
 
 test_pipeline = [
     dict(type='LoadImageFromFile'),

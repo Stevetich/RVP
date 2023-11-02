@@ -47,14 +47,14 @@ def save_rendered_imgs(voc_dir, superpixel_dir, rendered_dir, color_mode):
         remain_imgs[superpixels_masks.logical_not()] = img_repeated[superpixels_masks.logical_not()]
         
         # Render images
-        # if color_mode == 'R':
-        #     rendered_imgs = (mask_imgs * 0.6 + superpixels_masks * Red * 0.4) + remain_imgs
-        # elif color_mode == 'G':
-        #     rendered_imgs = (mask_imgs * 0.6 + superpixels_masks * Green * 0.4) + remain_imgs
-        # elif color_mode == 'B':
-        #     rendered_imgs = (mask_imgs * 0.6 + superpixels_masks * Blue * 0.4) + remain_imgs
-        # else:
-        #     raise ValueError('Color not supported: {}'.format(color_mode))
+        if color_mode == 'R':
+            rendered_imgs = (mask_imgs * 0.6 + superpixels_masks * Red * 0.4) + remain_imgs
+        elif color_mode == 'G':
+            rendered_imgs = (mask_imgs * 0.6 + superpixels_masks * Green * 0.4) + remain_imgs
+        elif color_mode == 'B':
+            rendered_imgs = (mask_imgs * 0.6 + superpixels_masks * Blue * 0.4) + remain_imgs
+        else:
+            raise ValueError('Color not supported: {}'.format(color_mode))
 
         
         _, _, H, W = superpixels_masks.shape
@@ -72,9 +72,9 @@ def save_rendered_imgs(voc_dir, superpixel_dir, rendered_dir, color_mode):
         
         # Save rendered images of all ids per img
         for id in range(img_repeated.shape[0]):
-            # rendered_img = rendered_imgs[id].permute(1, 2, 0).numpy().astype(np.uint8)
-            rendered_img = img_repeated[id].permute(1, 2, 0).numpy().astype(np.uint8)
-            cv2.circle(rendered_img, (int(np.round(x_center[id][0].item())), int(np.round(y_center[id][0].item()))), 8, (0, 255, 0), -1)
+            rendered_img = rendered_imgs[id].permute(1, 2, 0).numpy().astype(np.uint8)
+            # rendered_img = img_repeated[id].permute(1, 2, 0).numpy().astype(np.uint8)
+            # cv2.circle(rendered_img, (int(np.round(x_center[id][0].item())), int(np.round(y_center[id][0].item()))), 8, (0, 255, 0), -1)
             
             img_path = os.path.join(rendered_img_save_dir, "{}.jpg".format(id))
             cv2.imwrite(img_path, rendered_img)

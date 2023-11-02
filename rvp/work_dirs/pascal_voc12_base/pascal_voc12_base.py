@@ -21,7 +21,7 @@ data_preprocessor = dict(
         57.375,
     ],
     type='SegDataPreProcessor')
-data_root = '/home/jy/mm/RVP/data/VOCdevkit/VOC2012/'
+data_root = '/remote-home/zhangjiacheng/RVP/data/VOCdevkit/VOC2012/'
 dataset_type = 'PascalVOCDataset'
 default_scope = 'mmseg'
 env_cfg = dict(
@@ -123,7 +123,7 @@ val_dataloader = dict(
         ann_file='ImageSets/Segmentation/val100.txt',
         data_prefix=dict(
             img_path='JPEGImages', seg_map_path='SegmentationClass'),
-        data_root='/home/jy/mm/RVP/data/VOCdevkit/VOC2012/',
+        data_root='/remote-home/zhangjiacheng/RVP/data/VOCdevkit/VOC2012/',
         pipeline=[
             dict(type='LoadImageFromFile'),
             dict(type='LoadAnnotations'),
