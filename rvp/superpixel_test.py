@@ -85,8 +85,7 @@ def parse_args():
 
     return args
 
-
-if __name__ == "__main__":
+def main():
     args = parse_args()
     
     # DDP
@@ -110,6 +109,7 @@ if __name__ == "__main__":
     assert os.path.isdir(superpixel_dir), 'Not a valid superpixel image dir: {}'.format(superpixel_dir)
     assert os.path.isdir(semseg_dir), 'Not a valid semseg prediction image dir: {}'.format(semseg_dir)
 
+
     if rank == 0:
         print ('Voc original images dir: {}'.format(voc_dir))
         print ('Superpixel images dir: {}'.format(superpixel_dir))
@@ -117,7 +117,6 @@ if __name__ == "__main__":
         
         print ('Slic method name: {}'.format(slic_method_name))
         print ('Color mode: {}'.format(args.color))
-    
 
     # load config
     cfg = Config.fromfile(args.config)
@@ -226,3 +225,7 @@ if __name__ == "__main__":
     metrics = evaluator.evaluate(len(val_dataloader.dataset))
     runner.call_hook('after_val_epoch', metrics=metrics)
     runner.call_hook('after_val')
+    
+
+if __name__ == "__main__":
+    main()
