@@ -26,6 +26,7 @@ from mmengine.runner import Runner
 
 import warnings
 warnings.simplefilter(action='ignore', category=Warning)
+import ipdb
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -105,9 +106,9 @@ def main():
     superpixel_dir = os.path.join(args.data_root, superpixel_base_dir, slic_method_name)
     semseg_dir = os.path.join(args.data_root, semseg_base_dir, slic_method_name, args.color)
     
-    assert os.path.isdir(voc_dir), 'Not a valid voc image dir: {}'.format(voc_dir)
-    assert os.path.isdir(superpixel_dir), 'Not a valid superpixel image dir: {}'.format(superpixel_dir)
-    assert os.path.isdir(semseg_dir), 'Not a valid semseg prediction image dir: {}'.format(semseg_dir)
+    # assert os.path.isdir(voc_dir), 'Not a valid voc image dir: {}'.format(voc_dir)
+    # assert os.path.isdir(superpixel_dir), 'Not a valid superpixel image dir: {}'.format(superpixel_dir)
+    # assert os.path.isdir(semseg_dir), 'Not a valid semseg prediction image dir: {}'.format(semseg_dir)
 
 
     if rank == 0:
@@ -183,8 +184,10 @@ def main():
         # sem_pred_G = cv2.imread(os.path.join(sem_pred_dir_B, img_name))
         # sem_pred_G = torch.tensor(sem_pred_G)[:,:,[0]].permute(2,0,1)
         
-        sem_pred_B = cv2.imread(os.path.join(sem_pred_dir_B, img_name))
-        sem_pred_B = torch.tensor(sem_pred_B)[:,:,[0]].permute(2,0,1)
+        # sem_pred_B = cv2.imread(os.path.join(sem_pred_dir_B, img_name))
+        # sem_pred_B = torch.tensor(sem_pred_B)[:,:,[0]].permute(2,0,1)
+        sem_pred_B = np.load(os.path.join(sem_pred_dir_B, img_name.split('.')[0] + '.npy'))
+        sem_pred_B = torch.from_numpy(sem_pred_B)
 
         # sem_pred = torch.zeros_like(sem_pred_R)
         # sem_pred_merge = torch.cat([sem_pred_R, sem_pred_G, sem_pred_B], dim=0)
@@ -194,6 +197,9 @@ def main():
         #     for j in range(sem_pred_merge.shape[2]):
         #         sem_pred[:, i, j] = torch.argmax(torch.bincount(sem_pred_merge[:, i, j]))
         # # print ('sem_pred: {}, shape: {}'.format(sem_pred, sem_pred.shape))
+        
+        # ipdb.set_trace()
+
 
         pred_sem_seg = PixelData()
         # pred_sem_seg.data = pseudo_outputs.gt_sem_seg.data

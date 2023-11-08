@@ -11,6 +11,18 @@ import torch.distributed as dist
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
+import torchvision.transforms as T
+import torch.nn.functional as F
+import torchvision.transforms.functional as TF
+
+from sklearn.cluster import KMeans
+
+from mmseg.datasets import PascalVOCDataset
+import shutil
+import ipdb
+
+import warnings
+warnings.filterwarnings("ignore")
 
 model_id = 'qwen/Qwen-VL-Chat'
 revision = 'v1.0.0'
@@ -31,14 +43,14 @@ for id, class_name in enumerate(classes):
     name2id[class_name] = id
     id2name[id] = class_name
 
-# prompt_template = "<img>{img_path}</img>The {color} mask in the figure covers part of an object, \
-#     please analyze what is the most likely category of this object? Please select from the categories given below: {class_names}.\
-#     Please distinguish as many categories of objects as possible, and do not be affected by the main objects in the figure."
+prompt_template = "<img>{img_path}</img>The green mask in the figure covers part of an object, \
+please analyze what is the most likely category of this object? Please select from the categories given below: {class_names}.\
+Please distinguish as many categories of objects as possible, and do not be affected by the main objects in the figure."
     
-prompt_template = "<img>{img_path}</img>In the above provided image, I have marked a specific location with a green dot. \
-    Please analyze the content at the red dot's position and tell me what it most likely belongs from categories given below: {class_names}. \
-    Please distinguish as many categories of objects as possible, and do not be affected by the main objects in the figure."
-    # Please just response with category names from the list I give you."
+# prompt_template = "<img>{img_path}</img>In the above provided image, I have marked a specific location with a green dot. \
+#     Please analyze the content at the red dot's position and tell me what it most likely belongs from categories given below: {class_names}. \
+#     Please distinguish as many categories of objects as possible, and do not be affected by the main objects in the figure."
+#     # Please just response with category names from the list I give you."
 
 voc_base_dir = "VOCdevkit/VOC2012/JPEGImages"
 superpixel_base_dir = "superpixel_img"
@@ -71,7 +83,20 @@ class RenderedImageDataset(Dataset):
     
     def __len__(self):
         return len(self.img_names)
+
+class FeatureHooker:
+    def __init__(self, layer):
+        self.layer = layer
+        self.fea = None
+        self.handle = None
+
+        self.register_hook()
+    
+    def hook_fn(self, m, fea_in, fea_out):
+        self.fea = fea_out.detach().cpu()
         
+    def register_hook(self):
+        self.handle = self.layer.register_forward_hook(self.hook_fn)        
 
 def main():
     # DDP
@@ -86,7 +111,8 @@ def main():
     parser.add_argument('--seg_num', type=int, default=30, help='Superpixel method mode.')
     parser.add_argument('--color', type=str, default='B', help='[R | G | B] Color of superpixel mask.')
     parser.add_argument('--batch_size', '-b', type=int, default=1, help='Batch size.')
-    parser.add_argument("--local_rank", type=int)
+    parser.add_argument('--local_rank', type=int)
+    parser.add_argument('--cluster_method', type=str, default='superpixel', help='[superpixel | feature_cluster]')
     args = parser.parse_args()
     
     assert args.slic_mode in ['scikit', 'fast'], "Slic mode not supported: {}".format(args.slic_mode)
@@ -99,13 +125,13 @@ def main():
     slic_method_name = args.slic_mode + str(args.seg_num)
     voc_dir = os.path.join(args.data_root, voc_base_dir)
     superpixel_dir = os.path.join(args.data_root, superpixel_base_dir, slic_method_name)
-    rendered_dir = os.path.join(args.data_root, rendered_base_dir, slic_method_name, args.color)
+    rendered_dir = os.path.join(args.data_root, rendered_base_dir)
     semseg_save_dir = os.path.join(args.data_root, semseg_base_dir, slic_method_name, args.color)
     if not os.path.isdir(semseg_save_dir):
         os.makedirs(semseg_save_dir, exist_ok=True)
     
     assert os.path.isdir(voc_dir), 'Not a valid voc image dir: {}'.format(voc_dir)
-    assert os.path.isdir(superpixel_dir), 'Not a valid superpixel image dir: {}'.format(superpixel_dir)
+    # assert os.path.isdir(superpixel_dir), 'Not a valid superpixel image dir: {}'.format(superpixel_dir)
     
     if rank == 0:
         print ('Voc original images dir: {}'.format(voc_dir))
@@ -130,58 +156,172 @@ def main():
     # 默认gpu进行推理，需要约24GB显存
     model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="cuda", trust_remote_code=True).eval()
     
-    
     # Dataset
-    val_dataset = RenderedImageDataset(rendered_dir)
-    sampler = DistributedSampler(val_dataset, shuffle=False)
-    val_loader = DataLoader(val_dataset, batch_size=1, sampler=sampler)
+    # val_dataset = RenderedImageDataset(rendered_dir)
+    val_dataset = PascalVOCDataset(
+        data_root = os.path.join(args.data_root, 'VOCdevkit/VOC2012'),
+        data_prefix=dict(
+            img_path='JPEGImages', seg_map_path='SegmentationClass'),
+        ann_file='ImageSets/Segmentation/val.txt',
+    )
     
-    for rendered_img_path, img_name, idx in val_loader:
-        # img_name: without postfix (.jpg)
-        print ("Index: {}".format(idx.item()))
-
-        img = cv2.imread(os.path.join(voc_dir, img_name[0]+".jpg"))
-        superpixels = cv2.imread(os.path.join(superpixel_dir, img_name[0]+".jpg"))
-        superpixels_ids = np.unique(superpixels)
-
-        # Gather superpixel masks
-        superpixels_masks = []
-        for superpixel_id in superpixels_ids:
-            mask = (superpixels == superpixel_id)
-            superpixels_masks.append(torch.tensor(mask))
-
-        superpixels_masks = torch.stack(superpixels_masks, dim=0)
-        superpixels_masks = superpixels_masks.permute(0,3,1,2)
-        pred_sem_seg = torch.zeros(img.shape[0], img.shape[1])
-        
-        # Generate ID Batch for the single rendered image.
-        id_imgs = os.listdir(rendered_img_path[0])
-        num_batches = int(np.ceil(len(id_imgs) / batch_size))
-        id_imgs_batch = []
-        for i in range(num_batches):
-            batch = id_imgs[i*batch_size: min((i+1)*batch_size, len(id_imgs))]
-            id_imgs_batch.append(batch)
-        
-        # Batch process
-        for batch in id_imgs_batch:
-            queries = []
-            for id in batch:
-                queries.append(prompt_template.format(img_path=os.path.join(rendered_img_path[0], id), color=color_full[args.color], class_names=classes_str))
-
-            responses, history = model.chat(tokenizer=tokenizer, queries=queries, history=None)
+    def custom_collate_fn(batch):
+        """
+        Custom collate function to filter out None values.
+        Args:
+            batch (Any): batch data.
+        """
+        batch = [{k: v for k, v in item.items() if v is not None} for item in batch]
+        return torch.utils.data.dataloader.default_collate(batch)
+    
+    sampler = DistributedSampler(val_dataset, shuffle=False)
+    val_loader = DataLoader(val_dataset, batch_size=1, sampler=sampler, collate_fn=custom_collate_fn)
+    
+    color = torch.tensor([[255, 0, 0], [0, 255, 0], [0, 0, 255]]) # R G B
+    Red = color[0].reshape(1, 3, 1, 1)
+    Green = color[1].reshape(1, 3, 1, 1)
+    Blue = color[2].reshape(1, 3, 1, 1)
+    
+    if args.cluster_method == 'feature_cluster':
+        for data in val_loader:
+            img_path = data['img_path'][0]
+            img_name = img_path.split('/')[-1].split('.')[0]
+            # print (img_name)
             
-            for response, id in zip(responses, batch):
-                # id: with postfix (.jpg)
+            img = cv2.imread(img_path)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            H, W = img.shape[0], img.shape[1]
+            img = torch.tensor(img.transpose(2, 0, 1))
+            
+            feature = [None]
+            def hook_fn(m, fea_in, fea_out):
+                feature[0] = fea_out.detach().cpu()
+            # Hook visual features
+            with torch.inference_mode():
+                # hooker = FeatureHooker(layer=model.transformer.visual.transformer.resblocks[47])
+                handle = model.transformer.visual.transformer.resblocks[47].register_forward_hook(hook_fn)
+                
+                queries = ['<img>{}</img>Describe this image.'.format(img_path)]
+                _, _ = model.chat(tokenizer=tokenizer, queries=queries, history=None)
+                # feature = hooker.fea[:, 0].float()
+                feature = feature[0][:, 0].float()
+                
+                # hooker.handle.remove()
+                handle.remove()
+                
+            
+            # Features clustering
+            num_clusters = 6
+            kmeans = KMeans(n_clusters=num_clusters)
+            cluster_ids = kmeans.fit_predict(feature)
+            cluster_img = np.zeros((448, 448, 3))
+            for i in range(32):
+                for j in range(32):
+                    patch_label = cluster_ids[i * 32 + j]
+                    cluster_img[i*14:(i+1)*14, j*14:(j+1)*14] = patch_label
+                    
+            # masks.shape: (ids, C, H, W)
+            masks = []
+            for id in np.unique(cluster_ids):
+                mask = (cluster_img == id)
+                masks.append(torch.tensor(mask))
+            masks = torch.stack(masks).permute(0, 3, 1, 2)
+            masks = TF.resize(masks, size=(H, W))
+            
+            img_repeated = img[None].expand_as(masks)
+            
+            mask_imgs = torch.zeros_like(img_repeated)
+            remain_imgs = torch.zeros_like(img_repeated)
+            mask_imgs[masks] = img_repeated[masks]
+            remain_imgs[masks.logical_not()] = img_repeated[masks.logical_not()]
+            
+            # Render images
+            # Mix-up (Background brightness unchanged)
+            color_mode = args.color
+            if color_mode == 'R':
+                rendered_imgs = (mask_imgs * 0.6 + masks * Red * 0.4) + remain_imgs
+                # rendered_imgs = img_repeated * 0.6 + masks * Red * 0.4
+            elif color_mode == 'G':
+                rendered_imgs = (mask_imgs * 0.6 + masks * Green * 0.4) + remain_imgs
+                # rendered_imgs = img_repeated * 0.6 + masks * Green * 0.4
+            elif color_mode == 'B':
+                rendered_imgs = (mask_imgs * 0.6 + masks * Blue * 0.4) + remain_imgs
+                # rendered_imgs = img_repeated * 0.6 + masks * Blue * 0.4
+            else:
+                raise ValueError('Color not supported: {}'.format(color_mode))
+            
+            pred_sem_seg = torch.zeros(img.shape[1], img.shape[2])
+            rendered_name_dir = os.path.join(rendered_dir, img_name)
+            os.makedirs(rendered_name_dir, exist_ok=True)
+            for id in np.unique(cluster_ids):
+                rendered_img = rendered_imgs[id].permute(1,2,0).numpy().astype(np.uint8)
+                img_path = os.path.join(rendered_name_dir, "{}.jpg".format(id))
+                rendered_img = cv2.cvtColor(rendered_img, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(img_path, rendered_img)
+                
+                with torch.inference_mode():
+                    responses, _ = model.chat(tokenizer, queries=[prompt_template.format(img_path=img_path, class_names=classes_str)], history=None)
+
+                    if img_name == '2007_001175':
+                    #     ipdb.set_trace()
+
+                        print (responses[0])
                 try:
-                    id = int(id.split('.')[0])
-                    class_id = name2id[response]
-                    superpixel_mask = superpixels_masks[id, 0]
-                    pred_sem_seg[superpixel_mask] = class_id
+                    class_id = name2id[responses[0]]
+                    pred_sem_seg[masks[id, 0]] = class_id
                 except:
                     continue
-            
-        cv2.imwrite(os.path.join(semseg_save_dir, img_name[0]+".jpg"), pred_sem_seg.numpy().astype(np.uint8))
+            if img_name == '2007_001175':
+                np.save('./test.npy', pred_sem_seg.numpy().astype(np.uint8))
+            np.save(os.path.join(semseg_save_dir, img_name+".npy"), pred_sem_seg.numpy().astype(np.uint8)[None])
+    elif args.cluster_method == 'superpixel':
+        for rendered_img_path, img_name, idx in val_loader:
+            # img_name: without postfix (.jpg)
+            print ("Index: {}".format(idx.item()))
 
+            img = cv2.imread(os.path.join(voc_dir, img_name[0]+".jpg"))
+            superpixels = cv2.imread(os.path.join(superpixel_dir, img_name[0]+".jpg"))
+            superpixels_ids = np.unique(superpixels)
+
+            # Gather superpixel masks
+            superpixels_masks = []
+            for superpixel_id in superpixels_ids:
+                mask = (superpixels == superpixel_id)
+                superpixels_masks.append(torch.tensor(mask))
+
+            superpixels_masks = torch.stack(superpixels_masks, dim=0)
+            superpixels_masks = superpixels_masks.permute(0,3,1,2)
+            pred_sem_seg = torch.zeros(img.shape[0], img.shape[1])
+            
+            # Generate ID Batch for the single rendered image.
+            id_imgs = os.listdir(rendered_img_path[0])
+            num_batches = int(np.ceil(len(id_imgs) / batch_size))
+            id_imgs_batch = []
+            for i in range(num_batches):
+                batch = id_imgs[i*batch_size: min((i+1)*batch_size, len(id_imgs))]
+                id_imgs_batch.append(batch)
+            
+            # Batch process
+            for batch in id_imgs_batch:
+                queries = []
+                for id in batch:
+                    queries.append(prompt_template.format(img_path=os.path.join(rendered_img_path[0], id), color=color_full[args.color], class_names=classes_str))
+
+                responses, history = model.chat(tokenizer=tokenizer, queries=queries, history=None)
+                
+                for response, id in zip(responses, batch):
+                    # id: with postfix (.jpg)
+                    try:
+                        id = int(id.split('.')[0])
+                        class_id = name2id[response]
+                        superpixel_mask = superpixels_masks[id, 0]
+                        pred_sem_seg[superpixel_mask] = class_id
+                    except:
+                        continue
+                
+            cv2.imwrite(os.path.join(semseg_save_dir, img_name[0]+".jpg"), pred_sem_seg.numpy().astype(np.uint8))
+    else:
+        raise ValueError('Cluster method not supported: {}'.format(args.cluster_method))
     
 if __name__ == '__main__':
     main()
