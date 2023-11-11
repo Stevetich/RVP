@@ -1,10 +1,13 @@
 import argparse
+import sys
+sys.path.append('/remote-home/zhangjiacheng/MiniGPT-4/')
 from modelscope import (
     snapshot_download, AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 )
 import os
 import cv2
 import numpy as np
+from PIL import Image
 
 import torch
 import torch.distributed as dist
@@ -14,9 +17,22 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torchvision.transforms as T
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
+from torchvision.transforms import InterpolationMode
 
+from minigpt4.common.config import Config
+from minigpt4.common.registry import registry
+from minigpt4.common.eval_utils import prepare_texts
+from minigpt4.conversation.conversation import CONV_VISION_minigptv2
+
+# imports modules for registration
+from minigpt4.datasets.builders import *
+from minigpt4.models import *
+from minigpt4.processors import *
+from minigpt4.runners import *
+from minigpt4.tasks import *
+
+from scipy.ndimage import label
 from sklearn.cluster import KMeans
-
 from mmseg.datasets import PascalVOCDataset
 import shutil
 import ipdb
@@ -43,9 +59,24 @@ for id, class_name in enumerate(classes):
     name2id[class_name] = id
     id2name[id] = class_name
 
-prompt_template = "<img>{img_path}</img>The green mask in the figure covers part of an object, \
+prompt_template = "<img>{img_path}</img>The blue mask in the figure covers part of an object, \
 please analyze what is the most likely category of this object? Please select from the categories given below: {class_names}.\
 Please distinguish as many categories of objects as possible, and do not be affected by the main objects in the figure."
+
+prompt_template = '<img>{}</img>You are a professional semantic segmentation model. \
+In the image, the green glow covers an object or part of an object.\
+From the following list: [background, aeroplane, bicycle, bird, boat, bottle, bus, car, cat, chair, cow, diningtable, dog, horse, motorbike, person, pottedplant, sheep, sofa, train, tvmonitor], \
+select the name that you think best represents the object or part of the object category under the green glow (or green mask). \
+You can guess the name of the covered object by the following steps: \
+1. Think "Is the object under the green glow (or green mask) complete?" \
+2. If complete, think "What is the object?" \
+3. If not complete, think "What is the complete object of this component?" \
+4. Strictly choose your answer from the above list. \
+5. If you are not certain with the object under the mask, just reply with "background".'
+
+# question = ("The blue mask in the figure covers part of an object, \
+# please analyze what is the most likely category of this object? Please select from the categories given below: {}.\
+# Please distinguish as many categories of objects as possible, and do not be affected by the main objects in the figure.".format(classes_str), )
     
 # prompt_template = "<img>{img_path}</img>In the above provided image, I have marked a specific location with a green dot. \
 #     Please analyze the content at the red dot's position and tell me what it most likely belongs from categories given below: {class_names}. \
@@ -144,6 +175,7 @@ def main():
     
     
     # Tokenizer and VL-Model
+    # QWen
     tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
     if not hasattr(tokenizer, 'model_dir'):
         tokenizer.model_dir = model_dir
@@ -155,6 +187,30 @@ def main():
     # model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="cpu", trust_remote_code=True).eval()
     # 默认gpu进行推理，需要约24GB显存
     model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="cuda", trust_remote_code=True).eval()
+
+    # MiniGPT V2
+    # class SimulateArgs:
+    #     def __init__(self):
+    #         self.cfg_path = '/remote-home/zhangjiacheng/MiniGPT-4/eval_configs/minigptv2_eval.yaml'
+    #         self.gpu_id = 0
+    #         self.options = None
+
+    # simulate_args = SimulateArgs()
+    # device = 'cuda:{}'.format(simulate_args.gpu_id)
+
+    # print('Initializing Chat')
+    # cfg = Config(simulate_args)
+    # model_config = cfg.model_cfg
+    # model_config.device_8bit = simulate_args.gpu_id
+    # model_cls = registry.get_model_class(model_config.arch)
+    # model = model_cls.from_config(model_config).to(device)
+    # model = model.eval()
+
+    # vis_processor_cfg = cfg.datasets_cfg.cc_sbu_align.vis_processor.train
+    # vis_processor = registry.get_processor_class(vis_processor_cfg.name).from_config(vis_processor_cfg)
+
+    # conv_temp = CONV_VISION_minigptv2.copy()
+    # conv_temp.system = ""
     
     # Dataset
     # val_dataset = RenderedImageDataset(rendered_dir)
@@ -186,7 +242,7 @@ def main():
         for data in val_loader:
             img_path = data['img_path'][0]
             img_name = img_path.split('/')[-1].split('.')[0]
-            # print (img_name)
+            print (img_name)
             
             img = cv2.imread(img_path)
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -203,30 +259,67 @@ def main():
                 
                 queries = ['<img>{}</img>Describe this image.'.format(img_path)]
                 _, _ = model.chat(tokenizer=tokenizer, queries=queries, history=None)
+                
+                # image = Image.open(img_path).convert('RGB')
+                # image = vis_processor(image)[None]
+                # text = prepare_texts(('Describe this image.', ), conv_temp)
+                # _ = model.generate(image, text, max_new_tokens=100, do_sample=False)
+
                 # feature = hooker.fea[:, 0].float()
                 feature = feature[0][:, 0].float()
+                # feature = feature[0][0, 1:, ...].float()
                 
                 # hooker.handle.remove()
                 handle.remove()
-                
             
-            # Features clustering
+            
+            # # Features clustering
             num_clusters = 6
             kmeans = KMeans(n_clusters=num_clusters)
             cluster_ids = kmeans.fit_predict(feature)
-            cluster_img = np.zeros((448, 448, 3))
-            for i in range(32):
-                for j in range(32):
-                    patch_label = cluster_ids[i * 32 + j]
-                    cluster_img[i*14:(i+1)*14, j*14:(j+1)*14] = patch_label
-                    
-            # masks.shape: (ids, C, H, W)
+            
+            # 离群点和空缺处理
+            cluster_ids = np.resize(cluster_ids, (32, 32))
             masks = []
             for id in np.unique(cluster_ids):
-                mask = (cluster_img == id)
+                mask = (cluster_ids == id)
                 masks.append(torch.tensor(mask))
-            masks = torch.stack(masks).permute(0, 3, 1, 2)
-            masks = TF.resize(masks, size=(H, W))
+            masks = torch.stack(masks)
+            
+            structure = [
+                [0, 1, 0],
+                [1, 1, 1],
+                [0, 1, 0]
+            ]
+
+            for mask in masks:
+                l, n = label(mask, structure=structure)
+                for lb in range(1, n + 1):
+                    if np.sum(lb == l) <= 3:
+                        mask[lb == l] = 0
+                
+                reversed_mask = mask.logical_not()
+                l, n = label(reversed_mask, structure=structure)
+                for lb in range(1, n + 1):
+                    if np.sum(lb == l) <= 10:
+                        mask[lb == l] = 1
+            masks = masks[:, None].repeat(1, 3, 1, 1)
+            masks = TF.resize(masks, (H, W), interpolation=InterpolationMode.NEAREST)
+            
+            # 正常不处理
+            # cluster_img = np.zeros((448, 448, 3))
+            # for i in range(32):
+            #     for j in range(32):
+            #         patch_label = cluster_ids[i * 32 + j]
+            #         cluster_img[i*14:(i+1)*14, j*14:(j+1)*14] = patch_label
+                    
+            # # masks.shape: (ids, C, H, W)
+            # masks = []
+            # for id in np.unique(cluster_ids):
+            #     mask = (cluster_img == id)
+            #     masks.append(torch.tensor(mask))
+            # masks = torch.stack(masks).permute(0, 3, 1, 2)
+            # masks = TF.resize(masks, size=(H, W))
             
             img_repeated = img[None].expand_as(masks)
             
@@ -253,19 +346,25 @@ def main():
             pred_sem_seg = torch.zeros(img.shape[1], img.shape[2])
             rendered_name_dir = os.path.join(rendered_dir, img_name)
             os.makedirs(rendered_name_dir, exist_ok=True)
-            for id in np.unique(cluster_ids):
+            for id in range(num_clusters):
                 rendered_img = rendered_imgs[id].permute(1,2,0).numpy().astype(np.uint8)
                 img_path = os.path.join(rendered_name_dir, "{}.jpg".format(id))
                 rendered_img = cv2.cvtColor(rendered_img, cv2.COLOR_RGB2BGR)
                 cv2.imwrite(img_path, rendered_img)
-                
+
                 with torch.inference_mode():
-                    responses, _ = model.chat(tokenizer, queries=[prompt_template.format(img_path=img_path, class_names=classes_str)], history=None)
+                    # image = Image.open(img_path).convert('RGB')
+                    # image = vis_processor(image)[None]
 
-                    if img_name == '2007_001175':
-                    #     ipdb.set_trace()
+                    # text = prepare_texts(question, conv_temp)
+                    # responses = model.generate(image, text, max_new_tokens=100, do_sample=False)
+                    responses, _ = model.chat(tokenizer, queries=[prompt_template.format(img_path)], history=None)
 
-                        print (responses[0])
+                    print (responses)
+                    # if img_name == '2007_001175':
+                    # #     ipdb.set_trace()
+
+                    #     print (answer)
                 try:
                     class_id = name2id[responses[0]]
                     pred_sem_seg[masks[id, 0]] = class_id

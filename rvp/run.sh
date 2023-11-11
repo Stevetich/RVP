@@ -7,7 +7,7 @@ COLOR="G"
 SLIC_MODE="scikit"
 SEG_NUM=30
 DATA_ROOT="../data"
-GPU_NUM=8
+GPU_NUM=4
 
 SAVE_SP_COMMAND="python save_superpixel.py \
 --data_root $DATA_ROOT --slic_mode $SLIC_MODE --seg_num $SEG_NUM "
