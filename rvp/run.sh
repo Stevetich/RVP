@@ -7,7 +7,7 @@ COLOR="G"
 SLIC_MODE="scikit"
 SEG_NUM=30
 DATA_ROOT="../data"
-GPU_NUM=4
+GPU_NUM=8
 
 SAVE_SP_COMMAND="python save_superpixel.py \
 --data_root $DATA_ROOT --slic_mode $SLIC_MODE --seg_num $SEG_NUM "
@@ -16,6 +16,7 @@ SAVE_RENDERED_COMMAND="python save_rendered.py \
 --data_root $DATA_ROOT --slic_mode $SLIC_MODE --seg_num $SEG_NUM \
 --color $COLOR "
 
+# env CUDA_VISIBLE_DEVICES=5,7 指定显卡加这个
 SAVE_SEMSEG_COMMAND="python -m torch.distributed.launch --nproc_per_node=$GPU_NUM ddp_voc_inference.py \
 --data_root $DATA_ROOT --slic_mode $SLIC_MODE --seg_num $SEG_NUM \
 --color $COLOR --batch_size 1 --cluster_method feature_cluster"
@@ -24,6 +25,7 @@ SAVE_SEMSEG_COMMAND="python -m torch.distributed.launch --nproc_per_node=$GPU_NU
 # --data_root $DATA_ROOT --slic_mode $SLIC_MODE --seg_num $SEG_NUM \
 # --color $COLOR "
 
+# env CUDA_VISIBLE_DEVICES=5,7 
 TEST_COMMAND="python -m torch.distributed.launch --nproc_per_node=$GPU_NUM superpixel_test.py \
 --data_root $DATA_ROOT --slic_mode $SLIC_MODE --seg_num $SEG_NUM \
 --color $COLOR "
@@ -38,6 +40,8 @@ TEST_COMMAND="python -m torch.distributed.launch --nproc_per_node=$GPU_NUM super
 
 echo "Saving semantic segmentation predictions..."
 $SAVE_SEMSEG_COMMAND
+
+# python -m torch.distributed.launch --nproc_per_node=$GPU_NUM gt_inference.py
 
 echo "Testing..."
 $TEST_COMMAND

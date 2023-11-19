@@ -43,7 +43,7 @@ warnings.filterwarnings("ignore")
 model_id = 'qwen/Qwen-VL-Chat'
 revision = 'v1.0.0'
 model_dir = '../Qwen-VL-Chat'
-
+finetune_dir = '/remote-home/zhangjiacheng/Qwen-VL/output_qwen_attn_perb'
 
 classes=['background', 'aeroplane', 'bicycle', 'bird', 'boat',
         'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable',
@@ -59,20 +59,24 @@ for id, class_name in enumerate(classes):
     name2id[class_name] = id
     id2name[id] = class_name
 
-prompt_template = "<img>{img_path}</img>The blue mask in the figure covers part of an object, \
-please analyze what is the most likely category of this object? Please select from the categories given below: {class_names}.\
-Please distinguish as many categories of objects as possible, and do not be affected by the main objects in the figure."
+# prompt_template = "<img>{img_path}</img>The blue mask in the figure covers part of an object, \
+# please analyze what is the most likely category of this object? Please select from the categories given below: {class_names}.\
+# Please distinguish as many categories of objects as possible, and do not be affected by the main objects in the figure."
 
-prompt_template = '<img>{}</img>You are a professional semantic segmentation model. \
-In the image, the green glow covers an object or part of an object.\
-From the following list: [background, aeroplane, bicycle, bird, boat, bottle, bus, car, cat, chair, cow, diningtable, dog, horse, motorbike, person, pottedplant, sheep, sofa, train, tvmonitor], \
-select the name that you think best represents the object or part of the object category under the green glow (or green mask). \
-You can guess the name of the covered object by the following steps: \
-1. Think "Is the object under the green glow (or green mask) complete?" \
-2. If complete, think "What is the object?" \
-3. If not complete, think "What is the complete object of this component?" \
-4. Strictly choose your answer from the above list. \
-5. If you are not certain with the object under the mask, just reply with "background".'
+# prompt_template = '<img>{}</img>You are a professional semantic segmentation model. \
+# In the image, the green glow covers an object or part of an object.\
+# From the following list: [background, aeroplane, bicycle, bird, boat, bottle, bus, car, cat, chair, cow, diningtable, dog, horse, motorbike, person, pottedplant, sheep, sofa, train, tvmonitor], \
+# select the name that you think best represents the object or part of the object category under the green glow (or green mask). \
+# You can guess the name of the covered object by the following steps: \
+# 1. Think "Is the object under the green glow (or green mask) complete?" \
+# 2. If complete, think "What is the object?" \
+# 3. If not complete, think "What is the complete object of this component?" \
+# 4. Strictly choose your answer from the above list. \
+# 5. If you are not certain with the object under the mask, just reply with "background".'
+
+prompt_template = '<img>{img_path}</img> \
+What is the most likely category of the object under the green glow? \
+Choose your answer from this list: {class_names}.'
 
 # question = ("The blue mask in the figure covers part of an object, \
 # please analyze what is the most likely category of this object? Please select from the categories given below: {}.\
@@ -186,7 +190,7 @@ def main():
     # 使用CPU进行推理，需要约32GB内存
     # model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="cpu", trust_remote_code=True).eval()
     # 默认gpu进行推理，需要约24GB显存
-    model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="cuda", trust_remote_code=True).eval()
+    model = AutoModelForCausalLM.from_pretrained(finetune_dir, device_map="cuda", trust_remote_code=True).eval()
 
     # MiniGPT V2
     # class SimulateArgs:
@@ -233,7 +237,7 @@ def main():
     sampler = DistributedSampler(val_dataset, shuffle=False)
     val_loader = DataLoader(val_dataset, batch_size=1, sampler=sampler, collate_fn=custom_collate_fn)
     
-    color = torch.tensor([[255, 0, 0], [0, 255, 0], [0, 0, 255]]) # R G B
+    color = torch.tensor([[255, 0, 0], [0, 255, 0], [0, 0, 255]]).cuda() # R G B
     Red = color[0].reshape(1, 3, 1, 1)
     Green = color[1].reshape(1, 3, 1, 1)
     Blue = color[2].reshape(1, 3, 1, 1)
@@ -247,7 +251,7 @@ def main():
             img = cv2.imread(img_path)
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             H, W = img.shape[0], img.shape[1]
-            img = torch.tensor(img.transpose(2, 0, 1))
+            img = torch.tensor(img.transpose(2, 0, 1)).cuda()
             
             feature = [None]
             def hook_fn(m, fea_in, fea_out):
@@ -274,7 +278,7 @@ def main():
             
             
             # # Features clustering
-            num_clusters = 6
+            num_clusters = 4
             kmeans = KMeans(n_clusters=num_clusters)
             cluster_ids = kmeans.fit_predict(feature)
             
@@ -295,15 +299,15 @@ def main():
             for mask in masks:
                 l, n = label(mask, structure=structure)
                 for lb in range(1, n + 1):
-                    if np.sum(lb == l) <= 3:
+                    if np.sum(lb == l) <= 8:
                         mask[lb == l] = 0
                 
                 reversed_mask = mask.logical_not()
                 l, n = label(reversed_mask, structure=structure)
                 for lb in range(1, n + 1):
-                    if np.sum(lb == l) <= 10:
+                    if np.sum(lb == l) <= 5:
                         mask[lb == l] = 1
-            masks = masks[:, None].repeat(1, 3, 1, 1)
+            masks = masks[:, None].repeat(1, 3, 1, 1).cuda()
             masks = TF.resize(masks, (H, W), interpolation=InterpolationMode.NEAREST)
             
             # 正常不处理
@@ -323,8 +327,8 @@ def main():
             
             img_repeated = img[None].expand_as(masks)
             
-            mask_imgs = torch.zeros_like(img_repeated)
-            remain_imgs = torch.zeros_like(img_repeated)
+            mask_imgs = torch.zeros_like(img_repeated).cuda()
+            remain_imgs = torch.zeros_like(img_repeated).cuda()
             mask_imgs[masks] = img_repeated[masks]
             remain_imgs[masks.logical_not()] = img_repeated[masks.logical_not()]
             
@@ -343,11 +347,11 @@ def main():
             else:
                 raise ValueError('Color not supported: {}'.format(color_mode))
             
-            pred_sem_seg = torch.zeros(img.shape[1], img.shape[2])
+            pred_sem_seg = torch.zeros(img.shape[1], img.shape[2]).cuda()
             rendered_name_dir = os.path.join(rendered_dir, img_name)
             os.makedirs(rendered_name_dir, exist_ok=True)
             for id in range(num_clusters):
-                rendered_img = rendered_imgs[id].permute(1,2,0).numpy().astype(np.uint8)
+                rendered_img = rendered_imgs[id].permute(1,2,0).cpu().numpy().astype(np.uint8)
                 img_path = os.path.join(rendered_name_dir, "{}.jpg".format(id))
                 rendered_img = cv2.cvtColor(rendered_img, cv2.COLOR_RGB2BGR)
                 cv2.imwrite(img_path, rendered_img)
@@ -358,7 +362,7 @@ def main():
 
                     # text = prepare_texts(question, conv_temp)
                     # responses = model.generate(image, text, max_new_tokens=100, do_sample=False)
-                    responses, _ = model.chat(tokenizer, queries=[prompt_template.format(img_path)], history=None)
+                    responses, _ = model.chat(tokenizer, queries=[prompt_template.format(img_path=img_path, class_names=classes_str)], history=None)
 
                     print (responses)
                     # if img_name == '2007_001175':
@@ -371,8 +375,8 @@ def main():
                 except:
                     continue
             if img_name == '2007_001175':
-                np.save('./test.npy', pred_sem_seg.numpy().astype(np.uint8))
-            np.save(os.path.join(semseg_save_dir, img_name+".npy"), pred_sem_seg.numpy().astype(np.uint8)[None])
+                np.save('./test.npy', pred_sem_seg.cpu().numpy().astype(np.uint8))
+            np.save(os.path.join(semseg_save_dir, img_name+".npy"), pred_sem_seg.cpu().numpy().astype(np.uint8)[None])
     elif args.cluster_method == 'superpixel':
         for rendered_img_path, img_name, idx in val_loader:
             # img_name: without postfix (.jpg)
