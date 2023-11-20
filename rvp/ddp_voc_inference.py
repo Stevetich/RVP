@@ -44,7 +44,10 @@ model_id = 'qwen/Qwen-VL-Chat'
 revision = 'v1.0.0'
 model_dir = '../Qwen-VL-Chat'
 # finetune_dir = '/remote-home/zhangjiacheng/Qwen-VL/output_qwen_attn_perb'
-finetune_dir = '/home/jy/mm/Qwen-VL/output_qwen_full'
+model_dir = '/home/jy/mm/Qwen-VL/output_qwen_full'
+n_clusters = 4
+island = 3
+valley = 10
 
 classes=['background', 'aeroplane', 'bicycle', 'bird', 'boat',
         'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable',
@@ -191,7 +194,7 @@ def main():
     # 使用CPU进行推理，需要约32GB内存
     # model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="cpu", trust_remote_code=True).eval()
     # 默认gpu进行推理，需要约24GB显存
-    model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="cuda", trust_remote_code=True).eval()
+    model = AutoModelForCausalLM.from_pretrained(finetune_dir, device_map="cuda", trust_remote_code=True).eval()
 
     # MiniGPT V2
     # class SimulateArgs:
@@ -279,7 +282,7 @@ def main():
             
             
             # # Features clustering
-            num_clusters = 4
+            num_clusters = n_clusters
             kmeans = KMeans(n_clusters=num_clusters)
             cluster_ids = kmeans.fit_predict(feature)
             
@@ -300,13 +303,13 @@ def main():
             for mask in masks:
                 l, n = label(mask, structure=structure)
                 for lb in range(1, n + 1):
-                    if np.sum(lb == l) <= 8:
+                    if np.sum(lb == l) <= island:
                         mask[lb == l] = 0
                 
                 reversed_mask = mask.logical_not()
                 l, n = label(reversed_mask, structure=structure)
                 for lb in range(1, n + 1):
-                    if np.sum(lb == l) <= 10:
+                    if np.sum(lb == l) <= valley:
                         mask[lb == l] = 1
             masks = masks[:, None].repeat(1, 3, 1, 1).cuda()
             masks = TF.resize(masks, (H, W), interpolation=InterpolationMode.NEAREST)
