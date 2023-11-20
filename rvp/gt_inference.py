@@ -19,15 +19,15 @@ import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from torchvision.transforms import InterpolationMode
 
-from minigpt4.common.config import Config
-from minigpt4.common.registry import registry
-from minigpt4.common.eval_utils import prepare_texts
-from minigpt4.conversation.conversation import CONV_VISION_minigptv2
-from minigpt4.datasets.builders import *
-from minigpt4.models import *
-from minigpt4.processors import *
-from minigpt4.runners import *
-from minigpt4.tasks import *
+# from minigpt4.common.config import Config
+# from minigpt4.common.registry import registry
+# from minigpt4.common.eval_utils import prepare_texts
+# from minigpt4.conversation.conversation import CONV_VISION_minigptv2
+# from minigpt4.datasets.builders import *
+# from minigpt4.models import *
+# from minigpt4.processors import *
+# from minigpt4.runners import *
+# from minigpt4.tasks import *
 
 from scipy.ndimage import label
 from sklearn.cluster import KMeans
@@ -46,7 +46,8 @@ warnings.filterwarnings("ignore")
 model_id = 'qwen/Qwen-VL-Chat'
 revision = 'v1.0.0'
 model_dir = '../Qwen-VL-Chat'
-
+# finetune_dir = '/remote-home/zhangjiacheng/Qwen-VL/output_qwen_attn_perb'
+finetune_dir = '/home/jy/mm/Qwen-VL/output_qwen_full'
 
 classes=['background', 'aeroplane', 'bicycle', 'bird', 'boat',
         'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable',

@@ -19,17 +19,17 @@ import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from torchvision.transforms import InterpolationMode
 
-from minigpt4.common.config import Config
-from minigpt4.common.registry import registry
-from minigpt4.common.eval_utils import prepare_texts
-from minigpt4.conversation.conversation import CONV_VISION_minigptv2
+# from minigpt4.common.config import Config
+# from minigpt4.common.registry import registry
+# from minigpt4.common.eval_utils import prepare_texts
+# from minigpt4.conversation.conversation import CONV_VISION_minigptv2
 
-# imports modules for registration
-from minigpt4.datasets.builders import *
-from minigpt4.models import *
-from minigpt4.processors import *
-from minigpt4.runners import *
-from minigpt4.tasks import *
+# # imports modules for registration
+# from minigpt4.datasets.builders import *
+# from minigpt4.models import *
+# from minigpt4.processors import *
+# from minigpt4.runners import *
+# from minigpt4.tasks import *
 
 from scipy.ndimage import label
 from sklearn.cluster import KMeans
@@ -43,7 +43,8 @@ warnings.filterwarnings("ignore")
 model_id = 'qwen/Qwen-VL-Chat'
 revision = 'v1.0.0'
 model_dir = '../Qwen-VL-Chat'
-finetune_dir = '/remote-home/zhangjiacheng/Qwen-VL/output_qwen_attn_perb'
+# finetune_dir = '/remote-home/zhangjiacheng/Qwen-VL/output_qwen_attn_perb'
+finetune_dir = '/home/jy/mm/Qwen-VL/output_qwen_full'
 
 classes=['background', 'aeroplane', 'bicycle', 'bird', 'boat',
         'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable',
@@ -190,7 +191,7 @@ def main():
     # 使用CPU进行推理，需要约32GB内存
     # model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="cpu", trust_remote_code=True).eval()
     # 默认gpu进行推理，需要约24GB显存
-    model = AutoModelForCausalLM.from_pretrained(finetune_dir, device_map="cuda", trust_remote_code=True).eval()
+    model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="cuda", trust_remote_code=True).eval()
 
     # MiniGPT V2
     # class SimulateArgs:
@@ -305,7 +306,7 @@ def main():
                 reversed_mask = mask.logical_not()
                 l, n = label(reversed_mask, structure=structure)
                 for lb in range(1, n + 1):
-                    if np.sum(lb == l) <= 5:
+                    if np.sum(lb == l) <= 10:
                         mask[lb == l] = 1
             masks = masks[:, None].repeat(1, 3, 1, 1).cuda()
             masks = TF.resize(masks, (H, W), interpolation=InterpolationMode.NEAREST)
