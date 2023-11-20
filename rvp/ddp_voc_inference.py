@@ -184,9 +184,9 @@ def main():
     
     # Tokenizer and VL-Model
     # QWen
-    tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained('../Qwen-VL-Chat', trust_remote_code=True)
     if not hasattr(tokenizer, 'model_dir'):
-        tokenizer.model_dir = model_dir
+        tokenizer.model_dir = '../Qwen-VL-Chat'
     # 打开bf16精度，A100、H100、RTX3060、RTX3070等显卡建议启用以节省显存
     # model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="auto", trust_remote_code=True, bf16=True).eval()
     # 打开fp16精度，V100、P100、T4等显卡建议启用以节省显存
@@ -194,7 +194,7 @@ def main():
     # 使用CPU进行推理，需要约32GB内存
     # model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="cpu", trust_remote_code=True).eval()
     # 默认gpu进行推理，需要约24GB显存
-    model = AutoModelForCausalLM.from_pretrained(finetune_dir, device_map="cuda", trust_remote_code=True).eval()
+    model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="cuda", trust_remote_code=True).eval()
 
     # MiniGPT V2
     # class SimulateArgs:
