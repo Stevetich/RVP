@@ -1,7 +1,7 @@
 #!/bin/bash
-# rm -rf ../data/rendered_img/*
-# rm -rf ../data/sem_seg_preds/*
-# rm -rf ../data/superpixel_img/*
+rm -rf ../data/rendered_img/*
+rm -rf ../data/sem_seg_preds/*
+rm -rf ../data/superpixel_img/*
 
 COLOR="G"
 SLIC_MODE="scikit"
@@ -38,8 +38,8 @@ TEST_COMMAND="python -m torch.distributed.launch --nproc_per_node=$GPU_NUM super
 # echo "Saving rendered images..."
 # $SAVE_RENDERED_COMMAND
 
-# echo "Saving semantic segmentation predictions..."
-# $SAVE_SEMSEG_COMMAND
+echo "Saving semantic segmentation predictions..."
+$SAVE_SEMSEG_COMMAND
 
 # python -m torch.distributed.launch --nproc_per_node=$GPU_NUM gt_inference.py
 
