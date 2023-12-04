@@ -25,7 +25,7 @@ val_dataloader = dict(
         data_root=data_root,
         data_prefix=dict(
             img_path='JPEGImages', seg_map_path='SegmentationClass'),
-        ann_file='ImageSets/Segmentation/val.txt',
+        ann_file='ImageSets/Segmentation/trainval.txt',
         pipeline=test_pipeline))
 val_cfg = dict(type='ValLoop')
 val_evaluator = dict(type='IoUMetric', iou_metrics=['mIoU'])

@@ -31,11 +31,13 @@ from torchvision.transforms import InterpolationMode
 # from minigpt4.runners import *
 # from minigpt4.tasks import *
 
+from collections import Counter
 from scipy.ndimage import label
 from sklearn.cluster import KMeans
 from mmseg.datasets import PascalVOCDataset
 import shutil
 import ipdb
+ipdb.launch_ipdb_on_exception()
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -44,10 +46,11 @@ model_id = 'qwen/Qwen-VL-Chat'
 revision = 'v1.0.0'
 model_dir = '../Qwen-VL-Chat'
 # finetune_dir = '/remote-home/zhangjiacheng/Qwen-VL/output_qwen_attn_perb'
-model_dir = '/home/jy/mm/Qwen-VL/output_qwen_full'
+model_dir = '/home/jy/mm/Qwen-VL/output_qwen_pnt_1sample'
 n_clusters = 4
 island = 3
 valley = 10
+kernel_size = 3
 
 classes=['background', 'aeroplane', 'bicycle', 'bird', 'boat',
         'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable',
@@ -78,8 +81,11 @@ for id, class_name in enumerate(classes):
 # 4. Strictly choose your answer from the above list. \
 # 5. If you are not certain with the object under the mask, just reply with "background".'
 
+# prompt_template = '<img>{img_path}</img> \
+# What is the most likely category of the object under the green glow? \
+# Choose your answer from this list: {class_names}.'
 prompt_template = '<img>{img_path}</img> \
-What is the most likely category of the object under the green glow? \
+What is the most likely category of the object marked by the green dot? \
 Choose your answer from this list: {class_names}.'
 
 # question = ("The blue mask in the figure covers part of an object, \
@@ -311,6 +317,10 @@ def main():
                 for lb in range(1, n + 1):
                     if np.sum(lb == l) <= valley:
                         mask[lb == l] = 1
+            
+            
+       
+            
             masks = masks[:, None].repeat(1, 3, 1, 1).cuda()
             masks = TF.resize(masks, (H, W), interpolation=InterpolationMode.NEAREST)
             
@@ -330,6 +340,7 @@ def main():
             # masks = TF.resize(masks, size=(H, W))
             
             img_repeated = img[None].expand_as(masks)
+
             
             mask_imgs = torch.zeros_like(img_repeated).cuda()
             remain_imgs = torch.zeros_like(img_repeated).cuda()
@@ -381,6 +392,176 @@ def main():
             if img_name == '2007_001175':
                 np.save('./test.npy', pred_sem_seg.cpu().numpy().astype(np.uint8))
             np.save(os.path.join(semseg_save_dir, img_name+".npy"), pred_sem_seg.cpu().numpy().astype(np.uint8)[None])
+    elif args.cluster_method == 'point':
+        for data in val_loader:
+            img_path = data['img_path'][0]
+            img_name = img_path.split('/')[-1].split('.')[0]
+            print (img_name)
+            
+            img = cv2.imread(img_path)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            H, W = img.shape[0], img.shape[1]
+            img = torch.tensor(img.transpose(2, 0, 1)).cuda()
+            
+            feature = [None]
+            def hook_fn(m, fea_in, fea_out):
+                feature[0] = fea_out.detach().cpu()
+            # Hook visual features
+            with torch.inference_mode():
+                # hooker = FeatureHooker(layer=model.transformer.visual.transformer.resblocks[47])
+                handle = model.transformer.visual.transformer.resblocks[47].register_forward_hook(hook_fn)
+                
+                queries = ['<img>{}</img>Describe this image.'.format(img_path)]
+                _, _ = model.chat(tokenizer=tokenizer, queries=queries, history=None)
+                
+                # image = Image.open(img_path).convert('RGB')
+                # image = vis_processor(image)[None]
+                # text = prepare_texts(('Describe this image.', ), conv_temp)
+                # _ = model.generate(image, text, max_new_tokens=100, do_sample=False)
+
+                # feature = hooker.fea[:, 0].float()
+                feature = feature[0][:, 0].float()
+                # feature = feature[0][0, 1:, ...].float()
+                
+                # hooker.handle.remove()
+                handle.remove()
+                
+            num_clusters = n_clusters
+            kmeans = KMeans(n_clusters=num_clusters)
+            cluster_ids = kmeans.fit_predict(feature)
+            
+            # 离群点和空缺处理
+            cluster_ids = np.resize(cluster_ids, (32, 32))
+            masks = []
+            for id in np.unique(cluster_ids):
+                mask = (cluster_ids == id)
+                masks.append(torch.tensor(mask))
+            masks = torch.stack(masks).byte()
+            
+            structure = [
+                [0, 1, 0],
+                [1, 1, 1],
+                [0, 1, 0]
+            ]
+
+            for mask in masks:
+                l, n = label(mask, structure=structure)
+                for lb in range(1, n + 1):
+                    if np.sum(lb == l) <= island:
+                        mask[lb == l] = 0
+                
+                reversed_mask = mask.logical_not()
+                l, n = label(reversed_mask, structure=structure)
+                for lb in range(1, n + 1):
+                    if np.sum(lb == l) <= valley:
+                        mask[lb == l] = 1
+            
+            # 加了一步形态学操作
+            # kernel = np.ones((kernel_size, kernel_size)).astype(np.uint8)
+            # for i in range(masks.shape[0]):
+            #     mask = masks[i].cpu().numpy()
+            #     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+            #     # mask = cv2.dilate(mask, kernel, iterations = 1)
+            #     # mask = cv2.erode(mask, kernel, iterations = 1)
+            #     masks[i] = torch.from_numpy(mask)
+                    
+            masks = masks[:, None].repeat(1, 3, 1, 1).cuda()
+            masks = TF.resize(masks, (H, W), interpolation=InterpolationMode.NEAREST)
+            img_repeated = img[None].expand_as(masks)
+            
+            # 计算质心（弃用了）
+            _, _, H, W = masks.shape
+            y_coords = torch.arange(H)[None, None, :, None].expand_as(masks).cuda()
+            x_coords = torch.arange(W)[None, None, None, :].expand_as(masks).cuda()
+
+            y_weighted = masks * y_coords
+            x_weighted = masks * x_coords
+
+            y_center = y_weighted.sum(dim=(2, 3)) / torch.where(y_weighted != 0, 1, 0).sum(dim=(2, 3))
+            x_center = x_weighted.sum(dim=(2, 3)) / torch.where(x_weighted != 0, 1, 0).sum(dim=(2, 3))
+            
+            color_mode = args.color
+            mask_imgs = torch.zeros_like(img_repeated).cuda()
+            remain_imgs = torch.zeros_like(img_repeated).cuda()
+            mask_imgs[masks] = img_repeated[masks]
+            remain_imgs[masks.logical_not()] = img_repeated[masks.logical_not()]
+            if color_mode == 'R':
+                rendered_imgs = (mask_imgs * 0.6 + masks * Red * 0.4) + remain_imgs
+                # rendered_imgs = img_repeated * 0.6 + masks * Red * 0.4
+            elif color_mode == 'G':
+                rendered_imgs = (mask_imgs * 0.6 + masks * Green * 0.4) + remain_imgs
+                # rendered_imgs = img_repeated * 0.6 + masks * Green * 0.4
+            elif color_mode == 'B':
+                rendered_imgs = (mask_imgs * 0.6 + masks * Blue * 0.4) + remain_imgs
+                # rendered_imgs = img_repeated * 0.6 + masks * Blue * 0.4
+            else:
+                raise ValueError('Color not supported: {}'.format(color_mode))
+            
+            # print ("x_center: {}".format(x_center))
+            # print ("y_center: {}".format(y_center))
+            # print ("masks: {}".format(masks.shape))
+            # print ("x: {}".format(torch.where(x_weighted != 0, 1, 0).sum(dim=(2, 3))))
+            # print ("y: {}".format(torch.where(y_weighted != 0, 1, 0).sum(dim=(2, 3))))
+            
+            pred_sem_seg = torch.zeros(img.shape[1], img.shape[2]).cuda()
+            rendered_name_dir = os.path.join(rendered_dir, img_name)
+            os.makedirs(rendered_name_dir, exist_ok=True)
+            for id in range(num_clusters):
+                coords = torch.nonzero(masks[id][0])
+                n = min(7, coords.shape[0])
+                sampled_coords = coords[torch.randperm(coords.shape[0])[:n]]
+                results = []
+                for y, x in sampled_coords:
+                    
+                    rendered_img = img.clone().permute(1,2,0).cpu().numpy().astype(np.uint8)
+                    img_path = os.path.join(rendered_name_dir, "{}.jpg".format(id))
+                    # try:
+                    #     cv2.circle(rendered_img, (int(np.round(x_center[id][0].item())), int(np.round(y_center[id][0].item()))), 6, (0, 255, 0), -1)
+                    # except:
+                    #     continue
+                    cv2.circle(rendered_img, (int(x), int(y)), 6, (0, 255, 0), -1)
+                    rendered_img = cv2.cvtColor(rendered_img, cv2.COLOR_RGB2BGR)
+                    cv2.imwrite(img_path, rendered_img)
+                    
+
+                    with torch.inference_mode():
+                        # image = Image.open(img_path).convert('RGB')
+                        # image = vis_processor(image)[None]
+
+                        # text = prepare_texts(question, conv_temp)
+                        # responses = model.generate(image, text, max_new_tokens=100, do_sample=False)
+                        responses, _ = model.chat(tokenizer, queries=[prompt_template.format(img_path=img_path, class_names=classes_str)], history=None)
+                        try:
+                            results.append(responses[0])
+                        except:
+                            continue
+                        # print (responses)
+                        # if img_name == '2007_001175':
+                        # #     ipdb.set_trace()
+
+                        #     print (answer)
+                if len(results) == 0:
+                    continue
+                
+                counter = Counter(results)
+                response = counter.most_common(1)[0][0]
+                # print (results)
+                try:
+                    rendered_img = rendered_imgs[id].permute(1,2,0).cpu().numpy().astype(np.uint8)
+                    img_path = os.path.join(rendered_name_dir, "{}_{}.jpg".format(id, response))
+                    rendered_img = cv2.cvtColor(rendered_img, cv2.COLOR_RGB2BGR)
+                    cv2.imwrite(img_path, rendered_img)
+                    
+                    class_id = name2id[response]
+                    # if class_id == 0:
+                    #     class_id = 255
+                    # pred_sem_seg[int(np.round(y_center[id][0].item())), int(np.round(x_center[id][0].item()))] = class_id
+                    pred_sem_seg[masks[id, 0]] = class_id
+                except:
+                    continue
+            np.save(os.path.join(semseg_save_dir, img_name+".npy"), pred_sem_seg.cpu().numpy().astype(np.uint8)[None])
+            
+            
     elif args.cluster_method == 'superpixel':
         for rendered_img_path, img_name, idx in val_loader:
             # img_name: without postfix (.jpg)

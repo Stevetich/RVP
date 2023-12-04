@@ -47,7 +47,7 @@ model_id = 'qwen/Qwen-VL-Chat'
 revision = 'v1.0.0'
 model_dir = '../Qwen-VL-Chat'
 # finetune_dir = '/remote-home/zhangjiacheng/Qwen-VL/output_qwen_attn_perb'
-finetune_dir = '/home/jy/mm/Qwen-VL/output_qwen_full'
+finetune_dir = '/home/jy/mm/Qwen-VL/output_qwen'
 
 classes=['background', 'aeroplane', 'bicycle', 'bird', 'boat',
         'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable',
@@ -66,9 +66,12 @@ for id, class_name in enumerate(classes):
 # prompt_template = "<img>{img_path}</img>The green mask in the figure covers part of an object, \
 # please analyze what is the most likely category of this object? Please select from the categories given below: {class_names}.\
 # Please distinguish as many categories of objects as possible, and do not be affected by the main objects in the figure."
-'The green glow on the picture is a manually added object mark.'
+# 'The green glow on the picture is a manually added object mark.'
+# prompt_template = '<img>{img_path}</img> \
+# What is the most likely category of the object under the green glow? \
+# Choose your answer from this list: {class_names}.'
 prompt_template = '<img>{img_path}</img> \
-What is the most likely category of the object under the green glow? \
+What is the most likely category of the object marked by the green dot? \
 Choose your answer from this list: {class_names}.'
 
 # prompt_template = "<img>{img_path}</img> What is the object under the green mask? \
@@ -113,7 +116,7 @@ def main():
     # 使用CPU进行推理，需要约32GB内存
     # model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="cpu", trust_remote_code=True).eval()
     # 默认gpu进行推理，需要约24GB显存
-    model = AutoModelForCausalLM.from_pretrained(model_dir, device_map="cuda", trust_remote_code=True).eval()
+    model = AutoModelForCausalLM.from_pretrained(finetune_dir, device_map="cuda", trust_remote_code=True).eval()
     
     class SimulateArgs:
         def __init__(self):
@@ -189,40 +192,102 @@ def main():
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = torch.from_numpy(img)[None].permute(0, 3, 1, 2).cuda()
         
-        # Mask: 1, C, H, W
-        mask = data_sample['data_samples'][0].gt_sem_seg.data.clone()
+        # # Mask: 1, C, H, W
+        # mask = data_sample['data_samples'][0].gt_sem_seg.data.clone()
+        # # mask[mask == 255] = 0
+        # # mask[mask != 0] = 1
+        # mask[(mask < 255) & (mask != 0)] = 1
         # mask[mask == 255] = 0
-        # mask[mask != 0] = 1
-        mask[(mask < 255) & (mask != 0)] = 1
-        mask[mask == 255] = 0
-        mask = mask[:, None].repeat(1, 3, 1, 1).bool().cuda()
+        # mask = mask[:, None].repeat(1, 3, 1, 1).bool().cuda()
+        
+        gt_mask = data_sample['data_samples'][0].gt_sem_seg.data.clone().cuda()
+        resized_mask = TF.resize(gt_mask, (448, 448), interpolation=InterpolationMode.NEAREST)
+        # resized_mask[(resized_mask < 255) & (resized_mask != 0)] = 1
+        resized_mask[resized_mask == 255] = 0
         
         # Render Images
-        mask_img = torch.zeros_like(img).cuda()
-        remain_img = torch.zeros_like(img).cuda()
-        mask_img[mask] = img[mask]
-        remain_img[mask.logical_not()] = img[mask.logical_not()]
+        # mask_img = torch.zeros_like(img).cuda()
+        # remain_img = torch.zeros_like(img).cuda()
+        # mask_img[mask] = img[mask]
+        # remain_img[mask.logical_not()] = img[mask.logical_not()]
 
-        # rendered_img = mask * Green * 0.4 + img * 0.6
-        rendered_img = (mask_img * 0.6 + mask * Green * 0.4) + remain_img
+        # rendered_img = (mask_img * 0.6 + mask * Green * 0.4) + remain_img
         
         pred_sem_seg = torch.zeros(img.shape[2], img.shape[3])
         rendered_name_dir = os.path.join(rendered_dir, img_name)
         os.makedirs(rendered_name_dir, exist_ok=True)
         
-        rendered_img = rendered_img[0].permute(1,2,0).cpu().numpy().astype(np.uint8)
-        img_path = os.path.join(rendered_name_dir, "{}.jpg".format(0))
-        rendered_img = cv2.cvtColor(rendered_img, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(img_path, rendered_img)
+        for l in torch.unique(resized_mask):
+            if (l == 0):
+                continue
+            l = l.item()
+            
+            # ptr = torch.zeros(32, 32, dtype=torch.bool)
+            # ptr_mask = torch.rand(32, 32) < 0.1
+            # for i in range(32):
+            #     for j in range(32):
+            #         lbl = torch.unique(resized_mask[0, i*14:(i+1)*14, j*14:(j+1)*14])
+            #         if torch.any(lbl == l): 
+            #             ptr[i, j] = True
+            # ptr[ptr_mask] ^= True
 
-        with torch.inference_mode():
-            responses, _ = model.chat(tokenizer, queries=[prompt_template.format(img_path=img_path, class_names=classes_str)], history=None)
-            print (responses)
-        try:
-            class_id = name2id[responses[0]]
-            pred_sem_seg[mask[0, 0]] = class_id
-        except:
-            pass
+            # mask = TF.resize(ptr[None], (gt_mask.shape[1], gt_mask.shape[2]), interpolation=InterpolationMode.NEAREST)
+            mask = torch.where(gt_mask == l, 1, 0)
+            mask = mask[:, None].repeat(1, 3, 1, 1).bool().cuda()
+            
+            # 计算质心
+            _, _, H, W = mask.shape
+            y_coords = torch.arange(H)[None, None, :, None].expand_as(mask).cuda()
+            x_coords = torch.arange(W)[None, None, None, :].expand_as(mask).cuda()
+
+            y_weighted = mask * y_coords
+            x_weighted = mask * x_coords
+
+            y_center = y_weighted.sum(dim=(2, 3)) / torch.where(y_weighted != 0, 1, 0).sum(dim=(2, 3))
+            x_center = x_weighted.sum(dim=(2, 3)) / torch.where(x_weighted != 0, 1, 0).sum(dim=(2, 3))
+            
+            # ipdb.set_trace()
+            # 随机取点
+            coords = torch.nonzero(mask)
+            rand_coords = coords[torch.randint(0, len(coords), (1, ))][0]
+            y_center, x_center = rand_coords[2][None, None], rand_coords[3][None, None]
+
+            mask_img = torch.zeros_like(img).cuda()
+            remain_img = torch.zeros_like(img).cuda()
+            mask_img[mask] = img[mask]
+            remain_img[mask.logical_not()] = img[mask.logical_not()]
+
+            # rendered_img = mask * Green * 0.4 + img * 0.6
+            # rendered_img = (mask_img * 0.6 + mask * Green * 0.4) + remain_img
+            rendered_img = img[0].clone().permute(1,2,0).cpu().numpy().astype(np.uint8)
+            cv2.circle(rendered_img, (int(np.round(x_center[0][0].item())), int(np.round(y_center[0][0].item()))), 8, (0, 255, 0), -1)
+            rendered_img = cv2.cvtColor(rendered_img, cv2.COLOR_RGB2BGR)
+            
+            tmp_img_path = os.path.join(rendered_name_dir, '{}.jpg'.format(l))
+            cv2.imwrite(tmp_img_path, rendered_img)
+            with torch.inference_mode():
+                responses, _ = model.chat(tokenizer, queries=[prompt_template.format(img_path=tmp_img_path, class_names=classes_str)], history=None)
+                print (responses)
+            try:
+                class_id = name2id[responses[0]]
+                pred_sem_seg[mask[0, 0]] = class_id
+            except:
+                pass
+        
+        
+        # rendered_img = rendered_img[0].permute(1,2,0).cpu().numpy().astype(np.uint8)
+        # rendered_img = cv2.cvtColor(rendered_img, cv2.COLOR_RGB2BGR)
+        # img_path = os.path.join(rendered_name_dir, "{}.jpg".format(0))
+        # cv2.imwrite(img_path, rendered_img)
+
+        # with torch.inference_mode():
+        #     responses, _ = model.chat(tokenizer, queries=[prompt_template.format(img_path=img_path, class_names=classes_str)], history=None)
+        #     print (responses)
+        # try:
+        #     class_id = name2id[responses[0]]
+        #     pred_sem_seg[mask[0, 0]] = class_id
+        # except:
+        #     pass
         
         seg_save_path = os.path.join(semseg_save_dir, img_name+".npy")
         np.save(seg_save_path, pred_sem_seg.numpy().astype(np.uint8)[None])

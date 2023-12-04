@@ -215,8 +215,8 @@ def main():
             data_batch=data_batch,
             outputs=pseudo_outputs)
         
-        if idx == 99:
-            break
+        # if idx == 99:
+        #     break
         
     # dist.barrier()
     

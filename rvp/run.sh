@@ -19,7 +19,7 @@ SAVE_RENDERED_COMMAND="python save_rendered.py \
 # env CUDA_VISIBLE_DEVICES=5,7 指定显卡加这个
 SAVE_SEMSEG_COMMAND="python -m torch.distributed.launch --nproc_per_node=$GPU_NUM ddp_voc_inference.py \
 --data_root $DATA_ROOT --slic_mode $SLIC_MODE --seg_num $SEG_NUM \
---color $COLOR --batch_size 1 --cluster_method feature_cluster"
+--color $COLOR --batch_size 1 --cluster_method point"
 
 # TEST_COMMAND="python superpixel_test.py \
 # --data_root $DATA_ROOT --slic_mode $SLIC_MODE --seg_num $SEG_NUM \

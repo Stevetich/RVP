@@ -910,7 +910,7 @@ class QWenLMHeadModel(QWenPreTrainedModel):
     def chat(
         self,
         tokenizer: PreTrainedTokenizer,
-        query: str,
+        queries: List[str],
         history: Optional[HistoryType],
         system: str = "You are a helpful assistant.",
         append_history: bool = True,
@@ -919,6 +919,17 @@ class QWenLMHeadModel(QWenPreTrainedModel):
         generation_config: Optional[GenerationConfig] = None,
         **kwargs,
     ) -> Tuple[str, HistoryType]:
+        """
+        Modified: Generate batch response.
+        Args:
+            tokenizer (PreTrainedTokenizer): tokenizer.
+            queries (List[str]): A list of constructed queries, composed of img paths and class names.
+            history (Optional[HistoryType]): default None in modified version.
+            stop_words_ids (Optional[List[List[int]]], optional): _description_. Defaults to None.
+
+        Returns:
+            Tuple[List(str), HistoryType]: return responses and history.
+        """
         generation_config = generation_config if generation_config is not None else self.generation_config
 
         assert stream is _SENTINEL, _ERROR_STREAM_IN_CHAT
@@ -931,19 +942,31 @@ class QWenLMHeadModel(QWenPreTrainedModel):
         max_window_size = kwargs.get('max_window_size', None)
         if max_window_size is None:
             max_window_size = generation_config.max_window_size
-        raw_text, context_tokens = make_context(
-            tokenizer,
-            query,
-            history=history,
-            system=system,
-            max_window_size=max_window_size,
-            chat_format=generation_config.chat_format,
-        )
+        
+        raw_texts = []
+        context_tokens_l = []
+        for query in queries:
+            raw_text, context_tokens = make_context(
+                tokenizer,
+                query,
+                history=history,
+                system=system,
+                max_window_size=max_window_size,
+                chat_format=generation_config.chat_format,
+            )
+            raw_texts.append(raw_text)
+            context_tokens_l.append(torch.tensor(context_tokens))
 
         stop_words_ids.extend(get_stop_words_ids(
             generation_config.chat_format, tokenizer
         ))
-        input_ids = torch.tensor([context_tokens]).to(self.device)
+        
+        # print ('raw_text: {}, type: {}, contokens: {}, type: {}'.format(raw_text, type(raw_text), context_tokens, type(context_tokens)))
+        # print ('stop_words_ids: {}, type: {}'.format(stop_words_ids, type(stop_words_ids)))
+        
+        # shape: (1, token_num)
+        # input_ids = torch.tensor([context_tokens]).to(self.device)
+        input_ids = torch.stack(context_tokens_l, dim=0).to(self.device)
         outputs = self.generate(
                     input_ids,
                     stop_words_ids=stop_words_ids,
@@ -951,22 +974,27 @@ class QWenLMHeadModel(QWenPreTrainedModel):
                     generation_config=generation_config,
                     **kwargs,
                 )
+        # print ('input_ids shape: {}'.format(input_ids.shape))
+        # print ('outputs shape: {}'.format(outputs.shape))
 
-        response = decode_tokens(
-            outputs[0],
-            tokenizer,
-            raw_text_len=len(raw_text),
-            context_length=len(context_tokens),
-            chat_format=generation_config.chat_format,
-            verbose=False,
-            errors='replace'
-        )
-
+        responses = []
+        for i in range(outputs.shape[0]):
+            response = decode_tokens(
+                outputs[i],
+                tokenizer,
+                raw_text_len=len(raw_texts[i]),
+                context_length=len(context_tokens),
+                chat_format=generation_config.chat_format,
+                verbose=False,
+                errors='replace'
+            )
+            responses.append(response)
+        
         if append_history:
-            history.append((query, response))
+            for query, response in zip(queries, responses):
+                history.append((query, response))
 
-        return response, history
-
+        return responses, history
     def chat_stream(
             self,
             tokenizer: PreTrainedTokenizer,
