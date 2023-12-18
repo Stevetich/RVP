@@ -21,8 +21,8 @@ data_preprocessor = dict(
         57.375,
     ],
     type='SegDataPreProcessor')
-data_root = '/home/jy/mm/RVP/data/datasets/VOCdevkit/VOC2012'
-dataset_type = 'PascalVOCDataset'
+data_root = '/home/jy/mm/RVP/data/datasets/context/VOCdevkit/VOC2010'
+dataset_type = 'PascalContextDataset'
 default_scope = 'mmseg'
 env_cfg = dict(
     cudnn_benchmark=True,
@@ -120,17 +120,17 @@ val_cfg = dict(type='ValLoop')
 val_dataloader = dict(
     batch_size=1,
     dataset=dict(
-        ann_file='ImageSets/Segmentation/train.txt',
+        ann_file='ImageSets/SegmentationContext/train.txt',
         data_prefix=dict(
-            img_path='JPEGImages', seg_map_path='SegmentationClass'),
-        data_root='/home/jy/mm/RVP/data/datasets/VOCdevkit/VOC2012',
+            img_path='JPEGImages', seg_map_path='SegmentationClassContext'),
+        data_root='/home/jy/mm/RVP/data/datasets/context/VOCdevkit/VOC2010',
         pipeline=[
             dict(type='LoadImageFromFile'),
             dict(type='LoadAnnotations'),
             dict(type='PackSegInputs'),
         ],
-        type='PascalVOCDataset'),
-    num_workers=8,
+        type='PascalContextDataset'),
+    num_workers=4,
     persistent_workers=True,
     sampler=dict(shuffle=False, type='DefaultSampler'))
 val_evaluator = dict(
@@ -146,4 +146,4 @@ visualizer = dict(
     vis_backends=[
         dict(type='LocalVisBackend'),
     ])
-work_dir = './work_dirs/pascal_voc12_base'
+work_dir = './work_dirs/pascal_context_base'

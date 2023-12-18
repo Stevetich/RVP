@@ -21,8 +21,8 @@ data_preprocessor = dict(
         57.375,
     ],
     type='SegDataPreProcessor')
-data_root = '/home/jy/mm/RVP/data/datasets/VOCdevkit/VOC2012'
-dataset_type = 'PascalVOCDataset'
+data_root = '/home/jy/mm/RVP/data/datasets/cityscapes'
+dataset_type = 'CityscapesDataset'
 default_scope = 'mmseg'
 env_cfg = dict(
     cudnn_benchmark=True,
@@ -112,6 +112,10 @@ norm_cfg = dict(requires_grad=True, type='SyncBN')
 resume = False
 test_pipeline = [
     dict(type='LoadImageFromFile'),
+    dict(keep_ratio=True, scale=(
+        2048,
+        1024,
+    ), type='Resize'),
     dict(type='LoadAnnotations'),
     dict(type='PackSegInputs'),
 ]
@@ -120,17 +124,20 @@ val_cfg = dict(type='ValLoop')
 val_dataloader = dict(
     batch_size=1,
     dataset=dict(
-        ann_file='ImageSets/Segmentation/train.txt',
         data_prefix=dict(
-            img_path='JPEGImages', seg_map_path='SegmentationClass'),
-        data_root='/home/jy/mm/RVP/data/datasets/VOCdevkit/VOC2012',
+            img_path='leftImg8bit/val', seg_map_path='gtFine/val'),
+        data_root='/home/jy/mm/RVP/data/datasets/cityscapes',
         pipeline=[
             dict(type='LoadImageFromFile'),
+            dict(keep_ratio=True, scale=(
+                2048,
+                1024,
+            ), type='Resize'),
             dict(type='LoadAnnotations'),
             dict(type='PackSegInputs'),
         ],
-        type='PascalVOCDataset'),
-    num_workers=8,
+        type='CityscapesDataset'),
+    num_workers=4,
     persistent_workers=True,
     sampler=dict(shuffle=False, type='DefaultSampler'))
 val_evaluator = dict(
@@ -146,4 +153,4 @@ visualizer = dict(
     vis_backends=[
         dict(type='LocalVisBackend'),
     ])
-work_dir = './work_dirs/pascal_voc12_base'
+work_dir = './work_dirs/cityscapes_base'

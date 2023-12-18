@@ -21,8 +21,8 @@ data_preprocessor = dict(
         57.375,
     ],
     type='SegDataPreProcessor')
-data_root = '/home/jy/mm/RVP/data/datasets/VOCdevkit/VOC2012'
-dataset_type = 'PascalVOCDataset'
+data_root = '/home/jy/mm/RVP/data/ade20k/ADEChallengeData2016'
+dataset_type = 'ADE20KDataset'
 default_scope = 'mmseg'
 env_cfg = dict(
     cudnn_benchmark=True,
@@ -112,7 +112,11 @@ norm_cfg = dict(requires_grad=True, type='SyncBN')
 resume = False
 test_pipeline = [
     dict(type='LoadImageFromFile'),
-    dict(type='LoadAnnotations'),
+    dict(keep_ratio=True, scale=(
+        2048,
+        512,
+    ), type='Resize'),
+    dict(reduce_zero_label=True, type='LoadAnnotations'),
     dict(type='PackSegInputs'),
 ]
 tta_model = dict(type='SegTTAModel')
@@ -120,17 +124,21 @@ val_cfg = dict(type='ValLoop')
 val_dataloader = dict(
     batch_size=1,
     dataset=dict(
-        ann_file='ImageSets/Segmentation/train.txt',
         data_prefix=dict(
-            img_path='JPEGImages', seg_map_path='SegmentationClass'),
-        data_root='/home/jy/mm/RVP/data/datasets/VOCdevkit/VOC2012',
+            img_path='images/validation',
+            seg_map_path='annotations/validation'),
+        data_root='/home/jy/mm/RVP/data/ade20k/ADEChallengeData2016',
         pipeline=[
             dict(type='LoadImageFromFile'),
-            dict(type='LoadAnnotations'),
+            dict(keep_ratio=True, scale=(
+                2048,
+                512,
+            ), type='Resize'),
+            dict(reduce_zero_label=True, type='LoadAnnotations'),
             dict(type='PackSegInputs'),
         ],
-        type='PascalVOCDataset'),
-    num_workers=8,
+        type='ADE20KDataset'),
+    num_workers=4,
     persistent_workers=True,
     sampler=dict(shuffle=False, type='DefaultSampler'))
 val_evaluator = dict(
@@ -146,4 +154,4 @@ visualizer = dict(
     vis_backends=[
         dict(type='LocalVisBackend'),
     ])
-work_dir = './work_dirs/pascal_voc12_base'
+work_dir = './work_dirs/ade20k_base'

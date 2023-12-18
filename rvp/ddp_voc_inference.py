@@ -7,6 +7,7 @@ from modelscope import (
 import os
 import cv2
 import numpy as np
+import random
 from PIL import Image
 
 import torch
@@ -42,14 +43,23 @@ ipdb.launch_ipdb_on_exception()
 import warnings
 warnings.filterwarnings("ignore")
 
+torch.manual_seed(1)
+torch.cuda.manual_seed(1)
+torch.cuda.manual_seed_all(1)
+np.random.seed(1)
+random.seed(1)
+
 model_id = 'qwen/Qwen-VL-Chat'
 revision = 'v1.0.0'
 model_dir = '../Qwen-VL-Chat'
 # finetune_dir = '/remote-home/zhangjiacheng/Qwen-VL/output_qwen_attn_perb'
-model_dir = '/home/jy/mm/Qwen-VL/output_qwen_pnt_1sample'
-n_clusters = 4
+model_dir = '/home/jy/mm/Qwen-VL/output_qwen'
+
+n_clusters = 6
 island = 3
 valley = 10
+vote_num = 7
+
 kernel_size = 3
 
 classes=['background', 'aeroplane', 'bicycle', 'bird', 'boat',
@@ -168,7 +178,7 @@ def main():
     
     # Directories
     slic_method_name = args.slic_mode + str(args.seg_num)
-    voc_dir = os.path.join(args.data_root, voc_base_dir)
+    voc_dir = os.path.join(args.data_root, 'datasets', voc_base_dir)
     superpixel_dir = os.path.join(args.data_root, superpixel_base_dir, slic_method_name)
     rendered_dir = os.path.join(args.data_root, rendered_base_dir)
     semseg_save_dir = os.path.join(args.data_root, semseg_base_dir, slic_method_name, args.color)
@@ -229,7 +239,7 @@ def main():
     # Dataset
     # val_dataset = RenderedImageDataset(rendered_dir)
     val_dataset = PascalVOCDataset(
-        data_root = os.path.join(args.data_root, 'VOCdevkit/VOC2012'),
+        data_root = os.path.join(args.data_root, 'datasets', 'VOCdevkit/VOC2012'),
         data_prefix=dict(
             img_path='JPEGImages', seg_map_path='SegmentationClass'),
         ann_file='ImageSets/Segmentation/val.txt',
@@ -508,7 +518,7 @@ def main():
             os.makedirs(rendered_name_dir, exist_ok=True)
             for id in range(num_clusters):
                 coords = torch.nonzero(masks[id][0])
-                n = min(7, coords.shape[0])
+                n = min(vote_num, coords.shape[0])
                 sampled_coords = coords[torch.randperm(coords.shape[0])[:n]]
                 results = []
                 for y, x in sampled_coords:

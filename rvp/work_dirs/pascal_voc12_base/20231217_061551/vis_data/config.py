@@ -120,7 +120,7 @@ val_cfg = dict(type='ValLoop')
 val_dataloader = dict(
     batch_size=1,
     dataset=dict(
-        ann_file='ImageSets/Segmentation/train.txt',
+        ann_file='ImageSets/Segmentation/val.txt',
         data_prefix=dict(
             img_path='JPEGImages', seg_map_path='SegmentationClass'),
         data_root='/home/jy/mm/RVP/data/datasets/VOCdevkit/VOC2012',

@@ -21,7 +21,7 @@ data_preprocessor = dict(
         57.375,
     ],
     type='SegDataPreProcessor')
-data_root = '/home/jy/mm/RVP/data/datasets/VOCdevkit/VOC2012'
+data_root = '/home/jy/mm/RVP/data/VOCdevkit/VOC2012'
 dataset_type = 'PascalVOCDataset'
 default_scope = 'mmseg'
 env_cfg = dict(
@@ -120,17 +120,17 @@ val_cfg = dict(type='ValLoop')
 val_dataloader = dict(
     batch_size=1,
     dataset=dict(
-        ann_file='ImageSets/Segmentation/train.txt',
+        ann_file='ImageSets/Segmentation/trainval.txt',
         data_prefix=dict(
             img_path='JPEGImages', seg_map_path='SegmentationClass'),
-        data_root='/home/jy/mm/RVP/data/datasets/VOCdevkit/VOC2012',
+        data_root='/home/jy/mm/RVP/data/VOCdevkit/VOC2012',
         pipeline=[
             dict(type='LoadImageFromFile'),
             dict(type='LoadAnnotations'),
             dict(type='PackSegInputs'),
         ],
         type='PascalVOCDataset'),
-    num_workers=8,
+    num_workers=4,
     persistent_workers=True,
     sampler=dict(shuffle=False, type='DefaultSampler'))
 val_evaluator = dict(

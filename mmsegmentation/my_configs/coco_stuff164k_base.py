@@ -3,8 +3,8 @@ _base_ = [
     '../configs/_base_/default_runtime.py',
 ]
 
-dataset_type = 'PascalVOCDataset'
-data_root = '/home/jy/mm/RVP/data/datasets/VOCdevkit/VOC2012'
+dataset_type = 'COCOStuffDataset'
+data_root = '/home/jy/mm/RVP/data/datasets/coco_stuff164k/dataset'
 
 test_pipeline = [
     dict(type='LoadImageFromFile'),
@@ -17,16 +17,16 @@ test_pipeline = [
 
 val_dataloader = dict(
     batch_size=1,
-    num_workers=8,
+    num_workers=4,
     persistent_workers=True,
     sampler=dict(type='DefaultSampler', shuffle=False),
     dataset=dict(
         type=dataset_type,
         data_root=data_root,
         data_prefix=dict(
-            img_path='JPEGImages', seg_map_path='SegmentationClass'),
-        ann_file='ImageSets/Segmentation/val.txt',
+            img_path='images/train2017', seg_map_path='annotations/train2017'),
         pipeline=test_pipeline))
+
 val_cfg = dict(type='ValLoop')
 val_evaluator = dict(type='IoUMetric', iou_metrics=['mIoU'])
 
