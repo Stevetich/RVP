@@ -3,7 +3,7 @@ _base_ = [
     '../configs/_base_/default_runtime.py',
 ]
 
-dataset_type = 'PascalContextDataset'
+dataset_type = 'PascalContextDataset59'
 data_root = '/home/jy/mm/RVP/data/datasets/context/VOCdevkit/VOC2010'
 
 test_pipeline = [

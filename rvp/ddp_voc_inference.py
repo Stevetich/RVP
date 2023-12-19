@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 import random
 from PIL import Image
+import faiss
 
 import torch
 import torch.distributed as dist
@@ -55,10 +56,10 @@ model_dir = '../Qwen-VL-Chat'
 # finetune_dir = '/remote-home/zhangjiacheng/Qwen-VL/output_qwen_attn_perb'
 model_dir = '/home/jy/mm/Qwen-VL/output_qwen'
 
-n_clusters = 6
+n_clusters = 5
 island = 3
 valley = 10
-vote_num = 7
+vote_num = 5
 
 kernel_size = 3
 
@@ -162,6 +163,7 @@ def main():
     
     parser = argparse.ArgumentParser(description='For Generation of Semantic Segmentation Predictions.')
     parser.add_argument('--data_root', type=str, default='../data', help='Location of the data.')
+    parser.add_argument('--dataset', type=str, default='voc', help='Location of the data.')
     parser.add_argument('--slic_mode', type=str, default='scikit', help='[scikit | fast] Superpixel method mode.')
     parser.add_argument('--seg_num', type=int, default=30, help='Superpixel method mode.')
     parser.add_argument('--color', type=str, default='B', help='[R | G | B] Color of superpixel mask.')
@@ -180,8 +182,10 @@ def main():
     slic_method_name = args.slic_mode + str(args.seg_num)
     voc_dir = os.path.join(args.data_root, 'datasets', voc_base_dir)
     superpixel_dir = os.path.join(args.data_root, superpixel_base_dir, slic_method_name)
-    rendered_dir = os.path.join(args.data_root, rendered_base_dir)
-    semseg_save_dir = os.path.join(args.data_root, semseg_base_dir, slic_method_name, args.color)
+    
+    rendered_dir = os.path.join(args.data_root, args.dataset, rendered_base_dir)
+    semseg_save_dir = os.path.join(args.data_root, args.dataset,semseg_base_dir, slic_method_name, args.color)
+    feature_dir = os.path.join(args.data_root, args.dataset, 'features')
     if not os.path.isdir(semseg_save_dir):
         os.makedirs(semseg_save_dir, exist_ok=True)
     
@@ -413,57 +417,71 @@ def main():
             H, W = img.shape[0], img.shape[1]
             img = torch.tensor(img.transpose(2, 0, 1)).cuda()
             
-            feature = [None]
-            def hook_fn(m, fea_in, fea_out):
-                feature[0] = fea_out.detach().cpu()
-            # Hook visual features
-            with torch.inference_mode():
-                # hooker = FeatureHooker(layer=model.transformer.visual.transformer.resblocks[47])
-                handle = model.transformer.visual.transformer.resblocks[47].register_forward_hook(hook_fn)
+            # feature = [None]
+            # def hook_fn(m, fea_in, fea_out):
+            #     feature[0] = fea_out.detach().cpu()
+            # # Hook visual features
+            # with torch.inference_mode():
+            #     # hooker = FeatureHooker(layer=model.transformer.visual.transformer.resblocks[47])
+            #     handle = model.transformer.visual.transformer.resblocks[47].register_forward_hook(hook_fn)
                 
-                queries = ['<img>{}</img>Describe this image.'.format(img_path)]
-                _, _ = model.chat(tokenizer=tokenizer, queries=queries, history=None)
+            #     queries = ['<img>{}</img>Describe this image.'.format(img_path)]
+            #     _, _ = model.chat(tokenizer=tokenizer, queries=queries, history=None)
                 
-                # image = Image.open(img_path).convert('RGB')
-                # image = vis_processor(image)[None]
-                # text = prepare_texts(('Describe this image.', ), conv_temp)
-                # _ = model.generate(image, text, max_new_tokens=100, do_sample=False)
+            #     # image = Image.open(img_path).convert('RGB')
+            #     # image = vis_processor(image)[None]
+            #     # text = prepare_texts(('Describe this image.', ), conv_temp)
+            #     # _ = model.generate(image, text, max_new_tokens=100, do_sample=False)
 
-                # feature = hooker.fea[:, 0].float()
-                feature = feature[0][:, 0].float()
-                # feature = feature[0][0, 1:, ...].float()
+            #     # feature = hooker.fea[:, 0].float()
+            #     feature = feature[0][:, 0].float().cuda()
+            #     # feature = feature[0][0, 1:, ...].float()
                 
-                # hooker.handle.remove()
-                handle.remove()
-                
-            num_clusters = n_clusters
-            kmeans = KMeans(n_clusters=num_clusters)
-            cluster_ids = kmeans.fit_predict(feature)
+            #     # hooker.handle.remove()
+            #     handle.remove()
             
-            # 离群点和空缺处理
-            cluster_ids = np.resize(cluster_ids, (32, 32))
+            # feature = feature.contiguous().view(32, 32, 1664).permute(2, 0, 1)[None]
+            # feature = F.interpolate(feature, (H, W), mode='bilinear').flatten(2).squeeze(0).permute(1, 0)
+            
+            # ### 这里的Kmeans修改一下
+            # # num_clusters = n_clusters
+            # # kmeans = KMeans(n_clusters=num_clusters)
+            # # cluster_ids = kmeans.fit_predict(feature.cpu().numpy())
+            # kmeans = faiss.Kmeans(feature.shape[1], 5, niter=40, verbose=True, gpu=True)
+            # tf = feature.cpu().contiguous().numpy().astype('float32')
+            # kmeans.train(tf)
+            # _, cluster_ids = kmeans.index.search(tf, 1)
+            
+            
+            ### 离群点和空缺处理
+            cluster_filepath = os.path.join(feature_dir, "{}.npy".format(img_name))
+            cluster_ids = np.load(cluster_filepath)
+            cluster_ids = torch.from_numpy(cluster_ids).cuda().contiguous().view(H, W)
+            # cluster_ids = np.resize(cluster_ids, (32, 32))
             masks = []
-            for id in np.unique(cluster_ids):
+            for id in torch.unique(cluster_ids):
                 mask = (cluster_ids == id)
                 masks.append(torch.tensor(mask))
-            masks = torch.stack(masks).byte()
+            masks = torch.stack(masks).byte().cpu()
             
             structure = [
                 [0, 1, 0],
                 [1, 1, 1],
                 [0, 1, 0]
             ]
+            
+            patch_size = H * W / (448 * 448) * 14 * 14
 
             for mask in masks:
                 l, n = label(mask, structure=structure)
                 for lb in range(1, n + 1):
-                    if np.sum(lb == l) <= island:
+                    if np.sum(lb == l) <= island * patch_size:
                         mask[lb == l] = 0
                 
                 reversed_mask = mask.logical_not()
                 l, n = label(reversed_mask, structure=structure)
                 for lb in range(1, n + 1):
-                    if np.sum(lb == l) <= valley:
+                    if np.sum(lb == l) <= valley * patch_size:
                         mask[lb == l] = 1
             
             # 加了一步形态学操作
@@ -476,7 +494,7 @@ def main():
             #     masks[i] = torch.from_numpy(mask)
                     
             masks = masks[:, None].repeat(1, 3, 1, 1).cuda()
-            masks = TF.resize(masks, (H, W), interpolation=InterpolationMode.NEAREST)
+            # masks = TF.resize(masks, (H, W), interpolation=InterpolationMode.NEAREST)
             img_repeated = img[None].expand_as(masks)
             
             # 计算质心（弃用了）
@@ -516,7 +534,7 @@ def main():
             pred_sem_seg = torch.zeros(img.shape[1], img.shape[2]).cuda()
             rendered_name_dir = os.path.join(rendered_dir, img_name)
             os.makedirs(rendered_name_dir, exist_ok=True)
-            for id in range(num_clusters):
+            for id in torch.unique(cluster_ids):
                 coords = torch.nonzero(masks[id][0])
                 n = min(vote_num, coords.shape[0])
                 sampled_coords = coords[torch.randperm(coords.shape[0])[:n]]

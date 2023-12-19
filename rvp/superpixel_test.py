@@ -74,6 +74,7 @@ def parse_args():
     
     
     parser.add_argument('--data_root', type=str, default='../data', help='Location of the data.')
+    parser.add_argument('--dataset', type=str, default='voc', help='Location of the data.')
     parser.add_argument('--slic_mode', type=str, default='scikit', help='[scikit | fast] Superpixel method mode.')
     parser.add_argument('--seg_num', type=int, default=30, help='Superpixel method mode.')
     parser.add_argument('--color', type=str, default='B', help='[R | G | B] Color of superpixel mask.')
